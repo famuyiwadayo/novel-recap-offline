@@ -1,12 +1,21 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import reactLogo from "./assets/react.svg";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event"
+import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow"
 import { pyInvoke } from "tauri-plugin-pytauri-api";
 import "./App.css";
 
 function App() {
   const [greetMsg, setGreetMsg] = useState("");
   const [name, setName] = useState("");
+
+  const [importResult, setImportResult] = useState("");
+  const [url, setUrl] = useState("");
+
+  const appWindow = getCurrentWebviewWindow();
+
+
 
   async function greet() {
     // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
@@ -15,6 +24,45 @@ function App() {
     const pyGreeting = await pyInvoke<string>("greet", { name });
     setGreetMsg(rsGreeting + "\n" + pyGreeting);
   }
+
+  async function importNovel() {
+    const importResult = await pyInvoke<string>("import_novel", { url })
+    setImportResult(importResult)
+  }
+
+
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    let unlistenReady: (() => void) | undefined;
+
+    async function setupListener() {
+      // Listen for the event emitted from Rust
+      unlisten = await listen<unknown>("test-event", (event) => {
+        console.log("Event received from PyTauri:", event.payload);
+      });
+
+      // Listen to the Tauri ready event
+      unlistenReady = await appWindow.once('on_webview_ready', async () => {
+        console.log("App is ready! Triggering Python function...");
+
+        try {
+          const response = await pyInvoke("on_app_ready");
+          console.log(response);
+        } catch (error) {
+          console.error("Failed to call Python command:", error);
+        }
+      });
+    }
+
+    setupListener();
+
+    // Clean up the listener when the component unmounts
+    return () => {
+      if (unlisten) unlisten();
+      if (unlistenReady) unlistenReady();
+    };
+  }, []);
 
   return (
     <main className="container">
@@ -42,7 +90,10 @@ function App() {
         className="row"
         onSubmit={async (e) => {
           e.preventDefault();
-          await greet();
+          // await greet();
+
+          await Promise.all([greet(), importNovel()])
+
         }}
       >
         <input
@@ -50,9 +101,18 @@ function App() {
           onChange={(e) => setName(e.currentTarget.value)}
           placeholder="Enter a name..."
         />
+        <input
+          id="import-input"
+          defaultValue="https://wtr-lab.com/en/novel/53992/lord-god-tier-attribute-recruits-fallen-angels-of-original-sin"
+          onChange={(e) => setUrl(e.currentTarget.value)}
+          placeholder="Enter web novel url..."
+        />
         <button type="submit">Greet</button>
       </form>
       <p id="greet-msg">{greetMsg}</p>
+      <p id="import-msg">
+        <pre>{JSON.stringify(importResult)}</pre>
+      </p>
     </main>
   );
 }

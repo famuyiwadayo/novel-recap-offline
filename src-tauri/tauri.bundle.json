@@ -9,8 +9,9 @@
       "app",
       "dmg"
     ],
-    "resources": {
-      "pyembed/python": "./"
-    }
+    "resources": [
+      "pyembed/python/**/*",
+      "binaries/ms-playwright/**/*"
+    ]
   }
 }
