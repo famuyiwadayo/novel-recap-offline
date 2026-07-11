@@ -47,6 +47,7 @@ class TaskState(Enum):
     QUEUED = auto()
     RUNNING = auto()
     RETRYING = auto()  # failed, waiting on backoff before requeue
+    PAUSED = auto()  # held out of the queue by pause_task()/pause_group()
     SUCCESS = auto()
     DEAD = auto()  # failed, retries exhausted — terminal
     CANCELLED = auto()
@@ -105,6 +106,7 @@ class GroupStats:
     queued: int = 0
     running: int = 0
     retrying: int = 0
+    paused: int = 0
     success: int = 0
     dead: int = 0
     cancelled: int = 0
@@ -173,6 +175,12 @@ class TaskQueueManager:
         self._resume_event.set()  # start unpaused
         self._task_group: Optional[TaskGroup] = None
         self._stopping = False
+
+        # per-task / per-group pause: tasks matching either set are pulled
+        # off the queue by a worker but held rather than run, until resumed.
+        self._paused_task_ids: set[str] = set()
+        self._paused_groups: set[str] = set()
+        self._held_tasks: Dict[str, Task] = {}  # task_id -> Task, waiting out a pause
 
     # --- plugin registration -------------------------------------------------
 
@@ -318,9 +326,11 @@ class TaskQueueManager:
             if t.state in (TaskState.RUNNING, TaskState.QUEUED, TaskState.RETRYING):
                 self.cancel(t.id)
 
-    # --- pause / resume ------------------------------------------------------
+    # --- pause / resume — global ----------------------------------------------
 
     def pause(self) -> None:
+        """Global pause: workers stop pulling new tasks. In-flight tasks
+        finish naturally."""
         self._resume_event = anyio.Event()
 
     def resume(self) -> None:
@@ -329,6 +339,72 @@ class TaskQueueManager:
     @property
     def is_paused(self) -> bool:
         return not self._resume_event.is_set()
+
+    # --- pause / resume — per task -----------------------------------------
+
+    def pause_task(self, task_id: str, *, cancel_running: bool = False) -> None:
+        """Hold this one task out of the queue. If it's QUEUED or waiting
+        on retry backoff, it simply won't run until resumed. If it's
+        currently RUNNING: by default (cancel_running=False) the in-flight
+        attempt is left alone to finish naturally — success/failure still
+        gets recorded normally — but if it would otherwise retry, that
+        retry is held instead of re-run. Pass cancel_running=True for an
+        immediate hard stop instead (the in-flight attempt is cancelled,
+        same as cancel(), and it's held from that point)."""
+        self._paused_task_ids.add(task_id)
+        task = self._tasks.get(task_id)
+        if task is None:
+            return
+        if cancel_running and task.state == TaskState.RUNNING:
+            scope = self._scopes.get(task_id)
+            if scope is not None:
+                scope.cancel()
+            return
+        if task.state == TaskState.QUEUED:
+            # already off the live queue conceptually — mark held so it's
+            # visible as PAUSED rather than silently sitting as QUEUED forever
+            self._held_tasks[task_id] = self._set_task(task_id, state=TaskState.PAUSED)
+
+    async def resume_task(self, task_id: str) -> bool:
+        """Un-hold a single task. Returns False if it wasn't paused/known."""
+        self._paused_task_ids.discard(task_id)
+        held = self._held_tasks.pop(task_id, None)
+        if held is None:
+            return task_id in self._tasks
+        task = self._set_task(task_id, state=TaskState.QUEUED)
+        await self._queue.put(task)
+        return True
+
+    # --- pause / resume — per group -----------------------------------------
+
+    def pause_group(self, group: str, *, cancel_running: bool = False) -> None:
+        """Hold every task in a group (e.g. pause just one novel while
+        others keep downloading). Same semantics as pause_task() per task."""
+        self._paused_groups.add(group)
+        for t in self.tasks_in_group(group):
+            if t.state in (TaskState.QUEUED, TaskState.RUNNING, TaskState.RETRYING):
+                self.pause_task(t.id, cancel_running=cancel_running)
+
+    async def resume_group(self, group: str) -> List[str]:
+        """Un-hold every paused task in a group. Returns the ids resumed."""
+        self._paused_groups.discard(group)
+        ids = [t.id for t in self.tasks_in_group(group) if t.id in self._held_tasks]
+        for tid in ids:
+            await self.resume_task(tid)
+        return ids
+
+    def is_task_paused(self, task_id: str) -> bool:
+        return task_id in self._paused_task_ids or task_id in self._held_tasks
+
+    def is_group_paused(self, group: str) -> bool:
+        return group in self._paused_groups
+
+    # --- internal: is this task currently gated by a pause? -----------------
+
+    def _is_gated(self, task: Task) -> bool:
+        return task.id in self._paused_task_ids or (
+            task.group is not None and task.group in self._paused_groups
+        )
 
     # --- run loop --------------------------------------------------------
 
@@ -347,13 +423,20 @@ class TaskQueueManager:
 
     async def _worker(self) -> None:
         while True:
-            # honor pause: re-read the current event each loop iteration
+            # honor global pause: re-read the current event each loop iteration
             await self._resume_event.wait()
             try:
                 task = await self._queue.get()
             except _QueueClosed:
                 return
             if task.state == TaskState.CANCELLED:
+                continue
+            if self._is_gated(task):
+                # held by pause_task()/pause_group() — don't run, don't
+                # re-push (that would busy-loop); sits here until resumed
+                self._held_tasks[task.id] = self._set_task(
+                    task.id, state=TaskState.PAUSED
+                )
                 continue
             await self._run_task(task)
 
@@ -420,5 +503,11 @@ class TaskQueueManager:
         # only requeue if nothing else changed its state in the meantime
         # (e.g. it wasn't cancelled while waiting on backoff)
         if task and task.state == TaskState.RETRYING:
+            if self._is_gated(task):
+                # paused mid-backoff — hold it instead of running the retry
+                self._held_tasks[task_id] = self._set_task(
+                    task_id, state=TaskState.PAUSED
+                )
+                return
             task = self._set_task(task_id, state=TaskState.QUEUED)
             await self._queue.put(task)
