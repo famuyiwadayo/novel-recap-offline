@@ -7,8 +7,8 @@ import { pyInvoke } from "tauri-plugin-pytauri-api";
 import "./App.css";
 
 function App() {
-  const [greetMsg, setGreetMsg] = useState("");
-  const [name, setName] = useState("");
+  // const [greetMsg, setGreetMsg] = useState("");
+  // const [name, setName] = useState("");
 
   const [importResult, setImportResult] = useState("");
   const [url, setUrl] = useState("");
@@ -17,16 +17,16 @@ function App() {
 
 
 
-  async function greet() {
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    const rsGreeting = await invoke<string>("greet", { name });
-    // Learn more about PyTauri commands at https://pytauri.github.io/pytauri/latest/usage/concepts/ipc/
-    const pyGreeting = await pyInvoke<string>("greet", { name });
-    setGreetMsg(rsGreeting + "\n" + pyGreeting);
-  }
+  // async function greet() {
+  //   // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+  //   const rsGreeting = await invoke<string>("greet", { name });
+  //   // Learn more about PyTauri commands at https://pytauri.github.io/pytauri/latest/usage/concepts/ipc/
+  //   // const pyGreeting = await pyInvoke<string>("greet", { name });
+  //   // setGreetMsg(rsGreeting + "\n" + pyGreeting);
+  // }
 
   async function importNovel() {
-    const importResult = await pyInvoke<string>("import_novel", { url })
+    const importResult = await pyInvoke<string>("scrape_novel", { source_url: url, novel_id: Math.random().toString() })
     setImportResult(importResult)
   }
 
@@ -38,7 +38,7 @@ function App() {
 
     async function setupListener() {
       // Listen for the event emitted from Rust
-      unlisten = await listen<unknown>("test-event", (event) => {
+      unlisten = await listen<unknown>("task-update", (event) => {
         console.log("Event received from PyTauri:", event.payload);
       });
 
@@ -92,15 +92,15 @@ function App() {
           e.preventDefault();
           // await greet();
 
-          await Promise.all([greet(), importNovel()])
+          await Promise.all([importNovel()])
 
         }}
       >
-        <input
+        {/* <input
           id="greet-input"
           onChange={(e) => setName(e.currentTarget.value)}
           placeholder="Enter a name..."
-        />
+        /> */}
         <input
           id="import-input"
           defaultValue="https://wtr-lab.com/en/novel/53992/lord-god-tier-attribute-recruits-fallen-angels-of-original-sin"
@@ -109,7 +109,7 @@ function App() {
         />
         <button type="submit">Greet</button>
       </form>
-      <p id="greet-msg">{greetMsg}</p>
+      {/* <p id="greet-msg">{greetMsg}</p> */}
       <p id="import-msg">
         <pre>{JSON.stringify(importResult)}</pre>
       </p>

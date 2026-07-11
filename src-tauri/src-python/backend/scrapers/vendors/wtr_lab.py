@@ -1,4 +1,4 @@
-import random
+# import random
 import asyncio
 
 from urllib.parse import urlparse
@@ -117,84 +117,85 @@ class WtrLabScraper(BaseScraper):
     async def fetch_main_page_html_contents(
         self, url: str, network_mgr: NetworkManager
     ):
-        instance = network_mgr.headless_mgr
+        # instance = network_mgr.headless_mgr
         initial_html_content: str = ""
         chapters: list[str] = []
-        context = None
-        page = None
+        # context = None
+        # page = None
 
-        try:
-            await instance.initialize()
-            browser = instance.browser
+        async with network_mgr.page(url) as pg:
+            try:
+                # await instance.initialize()
+                # browser = instance.browser
 
-            if not browser:
+                # if not browser:
+                #     return "", []
+
+                # context = await browser.new_context(
+                #     user_agent=random.choice(network_mgr.user_agents),
+                #     viewport={"width": 1280, "height": 800},
+                # )
+
+                # page = await context.new_page()
+
+                # Navigate to the target web novel page URL
+                await pg.goto(url, wait_until="domcontentloaded", timeout=60000)
+
+                # Explicitly wait for javascript text frameworks to finish rendering elements into DOM
+                await pg.wait_for_selector(".chapter-details", timeout=60000)
+
+                initial_html_content = await pg.content()
+
+                tab = pg.get_by_role("tab", name="Table of Contents")
+                await asyncio.sleep(1)
+                await tab.click()
+                await pg.wait_for_selector(".chapter-list", timeout=10000)
+
+                accordion_items = pg.locator("div[data-slot='accordion-item']")
+                count = await accordion_items.count()
+                print(f"[+] Found {count} accordion panels to expand.")
+
+                accordions = await accordion_items.all()
+
+                if count > 0:
+                    for idx, item in enumerate(accordions):
+                        data_index = await item.get_attribute("data-index")
+                        print(
+                            f"[+] Processing accordion index: {data_index} (Loop index: {idx})"
+                        )
+
+                        trigger = item.locator("button[data-slot='accordion-trigger']")
+                        await trigger.click()
+
+                        anchor_elements = item.locator(
+                            "div[data-slot='accordion-content'] a"
+                        )
+
+                        try:
+                            await anchor_elements.first.wait_for(
+                                state="attached", timeout=5000
+                            )
+                        except Exception:
+                            print(
+                                f"[!] Warning: No links appeared in accordion {idx} after 5 seconds."
+                            )
+
+                        for a in await anchor_elements.all():
+                            link = await a.get_attribute("href")
+                            if link:
+                                chapters.append(link)
+
+                        await asyncio.sleep(1)
+
+                return initial_html_content, chapters
+
+            except Exception as exc:
+                print(f"[!] Failed to fetch HTML contents: {exc}")
                 return "", []
 
-            context = await browser.new_context(
-                user_agent=random.choice(network_mgr.user_agents),
-                viewport={"width": 1280, "height": 800},
-            )
-
-            page = await context.new_page()
-
-            # Navigate to the target web novel page URL
-            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-
-            # Explicitly wait for javascript text frameworks to finish rendering elements into DOM
-            await page.wait_for_selector(".chapter-details", timeout=60000)
-
-            initial_html_content = await page.content()
-
-            tab = page.get_by_role("tab", name="Table of Contents")
-            await asyncio.sleep(1)
-            await tab.click()
-            await page.wait_for_selector(".chapter-list", timeout=10000)
-
-            accordion_items = page.locator("div[data-slot='accordion-item']")
-            count = await accordion_items.count()
-            print(f"[+] Found {count} accordion panels to expand.")
-
-            accordions = await accordion_items.all()
-
-            if count > 0:
-                for idx, item in enumerate(accordions):
-                    data_index = await item.get_attribute("data-index")
-                    print(
-                        f"[+] Processing accordion index: {data_index} (Loop index: {idx})"
-                    )
-
-                    trigger = item.locator("button[data-slot='accordion-trigger']")
-                    await trigger.click()
-
-                    anchor_elements = item.locator(
-                        "div[data-slot='accordion-content'] a"
-                    )
-
-                    try:
-                        await anchor_elements.first.wait_for(
-                            state="attached", timeout=5000
-                        )
-                    except Exception:
-                        print(
-                            f"[!] Warning: No links appeared in accordion {idx} after 5 seconds."
-                        )
-
-                    for a in await anchor_elements.all():
-                        link = await a.get_attribute("href")
-                        if link:
-                            chapters.append(link)
-
-                    await asyncio.sleep(1)
-
-            return initial_html_content, chapters
-
-        except Exception as exc:
-            print(f"[!] Failed to fetch HTML contents: {exc}")
-            return "", []
-
-        finally:
-            if page is not None:
-                await page.close()
-            if context is not None:
-                await context.close()
-            await instance.shutdown()
+            # finally:
+            #     if page is not None:
+            #         await page.close()
+            #     if context is not None:
+            #         await context.close()
+            #     await instance.shutdown()

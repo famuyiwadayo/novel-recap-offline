@@ -1,6 +1,5 @@
 import os
 import sys
-import asyncio
 
 from pathlib import Path
 from anyio.from_thread import start_blocking_portal
@@ -9,9 +8,7 @@ from collections.abc import Callable
 
 from pytauri.path import PathResolver
 from pytauri import (
-    Commands,
     AppHandle,
-    Emitter,
     # RunEvent,
     Manager,
     RunEventType,
@@ -20,42 +17,12 @@ from pytauri import (
 )
 from pytauri_utils.async_tools import AsyncTools
 
-from backend.plugins import ImageDownloadPlugin, ImageDownloadPayload
-from backend.managers.task_queue import Task, TaskQueueManager, GroupStats
-from backend.scrapers.task_plugins import (
-    RegistryNovelDiscoveryPlugin,
-    RegistryChapterFetchPlugin,
-    NovelDiscoveryPayload,
-)
-from backend.managers.playwright_manager import PlaywrightManager
-from backend.scrapers.base import NovelMetadata
+from backend.commands import commands
+from backend.app import manager, network_mgr, wire_events, startup
+from backend.shutdown_listener import register_shutdown_listener
 
-# Your actual scraper registry (backend/scrapers/registry.py — dynamically
-# loads instantiated scrapers from backend/scrapers/vendors/).
-from backend.scrapers.registry import ScraperRegistry  # noqa: adjust import path to match your project
-
-# NetworkManager now wraps PlaywrightManager directly (replaces
-# headless_client.py) and adds offline-first connectivity awareness.
-from backend.managers.network_manager import NetworkManager  # noqa: adjust import path
-
-
-commands: Commands = Commands()
-
-# One long-lived manager + one long-lived browser + one network_mgr for the
-# whole app. Started lazily on first use (see _ensure_started) since
-# pytauri's exact app-setup-hook shape may differ by version.
-manager = TaskQueueManager(num_workers=5)
-pw_manager = PlaywrightManager(headless=True, max_contexts=3)
-network_mgr = NetworkManager(pw_manager)
-scraper_registry = ScraperRegistry()
-
-manager.register_plugin(RegistryNovelDiscoveryPlugin(scraper_registry, network_mgr))
-manager.register_plugin(RegistryChapterFetchPlugin(scraper_registry, network_mgr))
-manager.register_plugin(ImageDownloadPlugin())
 
 app_handle: AppHandle
-_started = False
-_wired = False
 
 
 class Person(BaseModel):
@@ -90,16 +57,6 @@ def resolve_browser_path(app_handle_: AppHandle) -> str:
         )
 
 
-async def start_network_heartbeat(app_handle_: AppHandle):
-    global network_mgr
-    network_mgr = NetworkManager(app_handle_)
-
-    while True:
-        # Check network configuration status every 15 seconds
-        await network_mgr.check_connectivity()
-        await asyncio.sleep(15)
-
-
 def app_setup_hook() -> Callable[[AppHandle], None]:
 
     def _app_setup_hook(app_handle_: AppHandle) -> None:
@@ -119,13 +76,6 @@ def app_setup_hook() -> Callable[[AppHandle], None]:
     return _app_setup_hook
 
 
-@commands.command()
-async def on_app_ready(app_handle: AppHandle) -> str:
-    # Register the heartbeat task worker loop directly inside the main thread frame
-    asyncio.create_task(start_network_heartbeat(app_handle))
-    return "Ok"
-
-
 def on_event(app_handle: AppHandle, run_event: RunEventType) -> None:
     # print("\n\nON_EVENT CALLED!!!!")
 
@@ -135,35 +85,59 @@ def on_event(app_handle: AppHandle, run_event: RunEventType) -> None:
     return None
 
 
-@commands.command()
-async def greet(body: Person) -> str:
-    return f"Hello, {body.name}! You've been greeted from Python {sys.version}!"
+# @commands.command()
+# async def import_novel(body: ImportPayload, app_handle: AppHandle) -> NovelMetadata:
+#     Emitter.emit(app_handle, "test-event", ImportPayload(url=body.url))
+#     network_mgr = NetworkManager(app_handle)
+#     scraper = scraper_registry.get_scraper_for_url(body.url)
 
+#     # # 2. Get network manager (Assuming it is globally initialized as shown previously)
+#     # # Fetch raw HTML content through our anti-ban proxy/throttler engine
 
-@commands.command()
-async def import_novel(body: ImportPayload, app_handle: AppHandle) -> NovelMetadata:
-    Emitter.emit(app_handle, "test-event", ImportPayload(url=body.url))
-    network_mgr = NetworkManager(app_handle)
-    scraper = scraper_registry.get_scraper_for_url(body.url)
+#     # # 3. Parse the layout safely over C-memory speed structures
+#     metadata = await scraper.parse_metadata(body.url, network_mgr)
 
-    # # 2. Get network manager (Assuming it is globally initialized as shown previously)
-    # # Fetch raw HTML content through our anti-ban proxy/throttler engine
-
-    # # 3. Parse the layout safely over C-memory speed structures
-    metadata = await scraper.parse_metadata(body.url, network_mgr)
-
-    # # Return structured dict back to your frontend UI
-    # return metadata.model_dump()
-    return metadata
+#     # # Return structured dict back to your frontend UI
+#     # return metadata.model_dump()
+#     return metadata
 
 
 def main() -> int:
-    with start_blocking_portal("asyncio") as portal:  # or `trio`
+    with (
+        start_blocking_portal(
+            "asyncio"
+        ) as portal,  # pytauri backend — must be "asyncio", not "trio"
+        AsyncTools(portal) as async_tools,
+    ):
         app = builder_factory().build(
             context=context_factory(),
             invoke_handler=commands.generate_handler(portal),
             setup=app_setup_hook(),
         )
+
+        # makes AsyncTools resolvable via Annotated[AsyncTools, State()] in
+        # any @commands.command() that still wants it directly
+        Manager.manage(app, async_tools)
+
+        app_handle = app.handle()
+
+        # 1. register event-forwarding listeners — plain sync call
+        wire_events(app_handle)
+
+        # 2. BLOCK until the browser is actually up, before the app starts
+        #    accepting IPC calls — this is what removes the race a
+        #    fire-and-forget start would otherwise have (a command hitting
+        #    network_mgr.page() before pw_manager.start() finished)
+        portal.call(startup)
+
+        # 3. these run forever — fire-and-forget via the portal (NOT
+        #    task_group.start_soon, which only works from inside an
+        #    already-running coroutine; portal.start_task_soon is the
+        #    equivalent callable from synchronous code)
+        portal.start_task_soon(manager.start)
+        portal.start_task_soon(network_mgr.start_monitoring)
+
+        register_shutdown_listener(app_handle, async_tools)
 
         exit_code = app.run_return(on_event)
         return exit_code
