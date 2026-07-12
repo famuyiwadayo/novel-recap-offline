@@ -13,6 +13,7 @@ dependencies = [
     "anyio == 4.*",
     "playwright>=1.60.0",
     "selectolax>=0.4.10",
+    "aiosqlite>=0.22.1",
 ]
 
 [project.entry-points.pytauri]
