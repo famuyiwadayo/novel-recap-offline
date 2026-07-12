@@ -1,19 +1,21 @@
-import { useEffect, useState } from "react";
+import React, { useState } from "react";
 import reactLogo from "./assets/react.svg";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event"
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow"
+// import { invoke } from "@tauri-apps/api/core";
+// import { listen } from "@tauri-apps/api/event"
+// import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow"
 import { pyInvoke } from "tauri-plugin-pytauri-api";
+import { Task } from "@/types"
 import "./App.css";
+import { useTaskEvents } from "./hooks";
 
 function App() {
   // const [greetMsg, setGreetMsg] = useState("");
   // const [name, setName] = useState("");
 
-  const [importResult, setImportResult] = useState("");
-  const [url, setUrl] = useState("");
+  const [, setImportResult] = useState("");
+  const [url, setUrl] = useState("https://wtr-lab.com/en/novel/53992/lord-god-tier-attribute-recruits-fallen-angels-of-original-sin");
 
-  const appWindow = getCurrentWebviewWindow();
+  // const appWindow = getCurrentWebviewWindow();
 
 
 
@@ -31,38 +33,63 @@ function App() {
   }
 
 
+  // const tasks = useTaskEvents((event) => {
+  //   if (event.payload.kind === 'novel_discovery') return event.payload
+  // })
 
-  useEffect(() => {
-    let unlisten: (() => void) | undefined;
-    let unlistenReady: (() => void) | undefined;
+  // console.log("Tasks", tasks)
 
-    async function setupListener() {
-      // Listen for the event emitted from Rust
-      unlisten = await listen<unknown>("task-update", (event) => {
-        console.log("Event received from PyTauri:", event.payload);
-      });
+  const TaskRow = React.memo(function TaskRow({ task }: { task: Task }) {
+    return <div><em>{task.state}</em> - {task.message} — {Math.round(task.progress * 100)}%</div>;
+  });
 
-      // Listen to the Tauri ready event
-      unlistenReady = await appWindow.once('on_webview_ready', async () => {
-        console.log("App is ready! Triggering Python function...");
+  function ProgressPanel() {
+    const { tasks } = useTaskEvents(["novel_discovery"]);
+    console.log("Task Event", [...tasks.values()])
+    return <>{[...tasks.values()].map((t) => <TaskRow key={t.id} task={t} />)}</>;
+  }
 
-        try {
-          const response = await pyInvoke("on_app_ready");
-          console.log(response);
-        } catch (error) {
-          console.error("Failed to call Python command:", error);
-        }
-      });
-    }
 
-    setupListener();
 
-    // Clean up the listener when the component unmounts
-    return () => {
-      if (unlisten) unlisten();
-      if (unlistenReady) unlistenReady();
-    };
-  }, []);
+  // useEffect(() => {
+  //   let unlisten: (() => void) | undefined;
+  //   let unlistenReady: (() => void) | undefined;
+
+  //   async function setupListener() {
+  //     // Listen for the event emitted from Rust
+  //     unlisten = await listen<Task>("task-update", (event) => {
+  //       const task = event.payload
+  //       switch (task.kind) {
+  //         case 'novel_discovery':
+  //           console.log("Novel discovery event:", task);
+  //           break;
+
+  //         default:
+  //           break;
+  //       }
+  //     });
+
+  //     // Listen to the Tauri ready event
+  //     unlistenReady = await appWindow.once('on_webview_ready', async () => {
+  //       console.log("App is ready! Triggering Python function...");
+
+  //       try {
+  //         const response = await pyInvoke("on_app_ready");
+  //         console.log(response);
+  //       } catch (error) {
+  //         console.error("Failed to call Python command:", error);
+  //       }
+  //     });
+  //   }
+
+  //   setupListener();
+
+  //   // Clean up the listener when the component unmounts
+  //   return () => {
+  //     if (unlisten) unlisten();
+  //     if (unlistenReady) unlistenReady();
+  //   };
+  // }, []);
 
   return (
     <main className="container">
@@ -103,16 +130,17 @@ function App() {
         /> */}
         <input
           id="import-input"
-          defaultValue="https://wtr-lab.com/en/novel/53992/lord-god-tier-attribute-recruits-fallen-angels-of-original-sin"
+          defaultValue={url}
           onChange={(e) => setUrl(e.currentTarget.value)}
           placeholder="Enter web novel url..."
         />
         <button type="submit">Greet</button>
       </form>
       {/* <p id="greet-msg">{greetMsg}</p> */}
-      <p id="import-msg">
+      {/* <p id="import-msg">
         <pre>{JSON.stringify(importResult)}</pre>
-      </p>
+      </p> */}
+      <ProgressPanel />
     </main>
   );
 }

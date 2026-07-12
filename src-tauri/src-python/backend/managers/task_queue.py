@@ -163,7 +163,11 @@ class _AsyncPriorityQueue:
 
 
 class TaskQueueManager:
-    def __init__(self, num_workers: int = 5) -> None:
+    def __init__(
+        self,
+        num_workers: int = 5,
+        progress_emit_min_interval: float = 0.0,  # 0.1 to throttle
+    ) -> None:
         self.num_workers = num_workers
         self._plugins: Dict[str, Plugin] = {}
         self._tasks: Dict[str, Task] = {}
@@ -181,6 +185,15 @@ class TaskQueueManager:
         self._paused_task_ids: set[str] = set()
         self._paused_groups: set[str] = set()
         self._held_tasks: Dict[str, Task] = {}  # task_id -> Task, waiting out a pause
+
+        # progress-only updates (no state change) are throttled to at most
+        # one emission per this many seconds per task — protects against a
+        # plugin calling report_progress() in a tight loop (e.g. per 64KB
+        # chunk on a fast/cached download) flooding listeners/IPC. State
+        # transitions are NEVER throttled — only pure progress ticks.
+        self._progress_emit_min_interval = progress_emit_min_interval
+        self._last_progress_emit: Dict[str, float] = {}
+        self._trailing_flush_scheduled: set[str] = set()
 
     # --- plugin registration -------------------------------------------------
 
@@ -239,12 +252,61 @@ class TaskQueueManager:
         updated = replace(current, updated_at=time.time(), **kwargs)
         self._tasks[task_id] = updated
 
-        for cb in list(self._task_listeners):
-            cb(updated)
-        stats = self.stats(updated.group)
-        for cb in list(self._stats_listeners):
-            cb(stats)
+        state_changed = updated.state != current.state
+        if state_changed:
+            self._last_progress_emit[task_id] = updated.updated_at
+            for cb in list(self._task_listeners):
+                cb(updated)
+            # GroupStats counts (queued/running/success/...) only ever
+            # change on a state transition — a progress/message-only
+            # update can NEVER affect them, so skip this O(group size)
+            # recomputation + the queue-stats event for those entirely.
+            stats = self.stats(updated.group)
+            for cb in list(self._stats_listeners):
+                cb(stats)
+            return updated
+
+        # Progress-only update (e.g. a report_progress() tick — no `state=`
+        # kwarg was passed). The stored task (self._tasks[task_id]) is
+        # already exactly up to date regardless of what happens below —
+        # only whether we push it to listeners *right now* is throttled.
+        last = self._last_progress_emit.get(task_id, 0.0)
+        elapsed = updated.updated_at - last
+        if elapsed >= self._progress_emit_min_interval:
+            self._last_progress_emit[task_id] = updated.updated_at
+            for cb in list(self._task_listeners):
+                cb(updated)
+        elif (
+            task_id not in self._trailing_flush_scheduled
+            and self._task_group is not None
+        ):
+            # Too soon to emit now — but do NOT just drop it. A plugin that
+            # only calls report_progress a handful of times total (e.g.
+            # novel_discovery's 2-3 calls) can easily have two of them land
+            # within the same throttle window if the underlying work is
+            # fast, and simply dropping the later one means the frontend's
+            # message/progress can get stuck on stale text right up until
+            # the next state transition. Instead, schedule a trailing-edge
+            # flush: once the remaining window elapses, emit whatever the
+            # CURRENT stored task state is at that time (picking up this
+            # update, or a newer one that arrived before the flush fired —
+            # either way nothing is silently lost, just delayed slightly).
+            self._trailing_flush_scheduled.add(task_id)
+            remaining = self._progress_emit_min_interval - elapsed
+            self._task_group.start_soon(
+                self._trailing_progress_flush, task_id, remaining
+            )
         return updated
+
+    async def _trailing_progress_flush(self, task_id: str, delay: float) -> None:
+        await anyio.sleep(delay)
+        self._trailing_flush_scheduled.discard(task_id)
+        task = self._tasks.get(task_id)
+        if task is None:
+            return
+        self._last_progress_emit[task_id] = time.time()
+        for cb in list(self._task_listeners):
+            cb(task)
 
     # --- enqueue / spawn -----------------------------------------------------
 

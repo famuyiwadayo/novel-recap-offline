@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 
 from selectolax.lexbor import LexborNode
+from backend.managers.task_queue import ProgressFn
 
 
 class ExtractedChapter(BaseModel):
@@ -37,13 +38,25 @@ class BaseScraper(BaseModel):
         return self.target_domain in url.lower()
 
     @abstractmethod
-    async def parse_metadata(self, source_url: str, network_mgr) -> NovelMetadata:
+    async def parse_metadata(
+        self,
+        source_url: str,
+        network_mgr,
+        *,
+        report_progress: ProgressFn,
+    ) -> NovelMetadata:
         """Parses the main landing page for novel info and the index table of contents."""
         pass
 
     @abstractmethod
     async def parse_chapter(
-        self, novel_id: str, chapter_url: str, chapter_num: int, network_mgr
+        self,
+        novel_id: str,
+        chapter_url: str,
+        chapter_num: int,
+        network_mgr,
+        *,
+        report_progress: ProgressFn,
     ) -> ExtractedChapter:
         """Parses an individual chapter page to extract headings and raw content text."""
         pass

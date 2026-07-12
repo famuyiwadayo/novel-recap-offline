@@ -31,7 +31,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Protocol, Union, runtime_checkable
+from typing import Optional, Any, Protocol, Union, runtime_checkable
 
 from anyio import to_thread
 
@@ -45,9 +45,21 @@ from backend.managers.task_queue import Plugin, PluginResult, ProgressFn, Task
 
 @runtime_checkable
 class ScraperLike(Protocol):
-    async def parse_metadata(self, source_url: str, network_mgr: Any) -> Any: ...
+    async def parse_metadata(
+        self,
+        source_url: str,
+        network_mgr: Any,
+        *,
+        report_progress: ProgressFn,
+    ) -> Any: ...
     async def parse_chapter(
-        self, novel_id: Any, chapter_url: str, chapter_num: int, network_mgr: Any
+        self,
+        novel_id: Any,
+        chapter_url: str,
+        chapter_num: int,
+        network_mgr: Any,
+        *,
+        report_progress: ProgressFn,
     ) -> Any: ...
 
 
@@ -127,7 +139,9 @@ class RegistryNovelDiscoveryPlugin(Plugin):
             raise NoScraperFound(f"No scraper registered for {payload.source_url!r}")
 
         report_progress(0.1, f"Using {type(scraper).__name__}")
-        metadata = await scraper.parse_metadata(payload.source_url, self._network_mgr)
+        metadata = await scraper.parse_metadata(
+            payload.source_url, self._network_mgr, report_progress=report_progress
+        )
         report_progress(1.0, f"Found {len(metadata.chapter_urls)} chapters")
 
         children = [
@@ -176,6 +190,7 @@ class RegistryChapterFetchPlugin(Plugin):
             payload.chapter_url,
             payload.chapter_num,
             self._network_mgr,
+            report_progress=report_progress,
         )
         # persistence is blocking file/DB I/O — offload, doesn't touch network_mgr
         await to_thread.run_sync(self._persist_chapter, chapter)

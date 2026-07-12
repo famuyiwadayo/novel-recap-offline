@@ -1,12 +1,34 @@
-# import random
 import asyncio
 
 from urllib.parse import urlparse
 
-from selectolax.lexbor import LexborHTMLParser
+from selectolax.lexbor import LexborHTMLParser, LexborNode
 
-from backend.scrapers.base import BaseScraper, NovelMetadata, ExtractedChapter
+from backend.managers.task_queue import ProgressFn
 from backend.managers.network_manager import NetworkManager
+from backend.scrapers.base import BaseScraper, NovelMetadata, ExtractedChapter
+
+
+def _require(node: LexborNode | None, selector: str, what: str) -> LexborNode:
+    """css_first that raises a clear, specific error instead of letting a
+    None propagate into the next .css_first()/.next/.text() call as an
+    opaque AttributeError. Use for fields the scrape can't meaningfully
+    continue without (title, chapter links, the containers themselves)."""
+    if node is None:
+        raise ValueError(f"Could not find {what} — parent node was None")
+    found = node.css_first(selector)
+    if found is None:
+        raise ValueError(f"Could not find {what} (selector: {selector!r})")
+    return found
+
+
+def _optional_text(node: LexborNode | None, default: str = "") -> str:
+    """For cosmetic/non-critical fields (tags, other titles, author names)
+    — a missing element shouldn't crash the whole scrape, just fall back."""
+    if node is None:
+        return default
+    text = node.text()
+    return text if text else default
 
 
 class WtrLabScraper(BaseScraper):
@@ -14,86 +36,104 @@ class WtrLabScraper(BaseScraper):
     def target_domain(self) -> str:
         return "wtr-lab.com"
 
-    def can_handle(self, url):
-        return super().can_handle(url)
-
-    async def parse_metadata(self, source_url, network_mgr: NetworkManager):
-        # Define a custom page-interaction script for this specific site structure
-
-        title: str = ""
-        other_title: str = ""
-        cover_image_url: str | None = None
-        total_chapters = 0
-        tags: list[str] = []
-
-        author: str = ""
-        status: str | None = None
-        other_author_name: str = ""
-
+    async def parse_metadata(
+        self, source_url, network_mgr: NetworkManager, *, report_progress: ProgressFn
+    ):
         parsed = urlparse(source_url)
         base_url = f"{parsed.scheme}://{parsed.netloc}"
 
+        # fetch_main_page_html_contents no longer swallows exceptions and
+        # return ("", []) sentinels — real failures now propagate with
+        # their actual cause, so there's nothing to check-and-re-raise here
+        # anymore; if this call returns, the content is real.
         html_content, raw_chapter_links = await self.fetch_main_page_html_contents(
-            source_url, network_mgr
+            source_url, network_mgr, report_progress
         )
-
-        if not html_content:
-            raise ValueError("Failed to retrieve HTML content from the page")
-
-        if not raw_chapter_links:
-            raise ValueError("Failed to retrieve chapter links from the page")
-
-        # html_content = results.
-        # Pass raw HTML text string down into the lightning-fast Lexbor C-engine
 
         tree = LexborHTMLParser(html_content)
 
-        card_content = tree.css_first(".p-2[data-slot='card-content']")
-
+        card_content = _require(
+            tree, ".p-2[data-slot='card-content']", "the main card content block"
+        )
         titlebox = card_content.child
         statusbox = card_content.child.next if card_content.child else None
         tagbox = card_content.last_child
         detailbox = tree.css_first(".p-2[data-slot='card-content'].chapter-details")
 
-        if titlebox:
-            title = titlebox.css_first("h1").text()
-            other_title = titlebox.css_first("p").text()
+        # --- required: without a title, the metadata isn't usable ---
+        report_progress(0.65, "Extracting novel title...")
+        title_el = _require(titlebox, "h1", "the novel title")
+        title = title_el.text()
+        other_title = _optional_text(titlebox.css_first("p") if titlebox else None)
 
-        if statusbox:
-            cover_image_url = statusbox.css_first("img").attributes["src"]
-            chapter_count = statusbox.css_first(
+        # --- optional: cover image / chapter count — soft-fail to sensible defaults ---
+        report_progress(0.68, "Extracting cover image...")
+        cover_image_url: str | None = None
+        total_chapters = 0
+        if statusbox is not None:
+            img_el = statusbox.css_first("img")
+            if img_el is not None:
+                cover_image_url = img_el.attributes.get("src")
+
+            chapter_count_label = statusbox.css_first(
                 "span[translate='no']:lexbor-contains('chapters'i)"
-            ).next
-            total_chapters = int(chapter_count.text()) if chapter_count else 0
+            )
+            chapter_count = chapter_count_label.next if chapter_count_label else None
+            if chapter_count is not None:
+                try:
+                    total_chapters = int(chapter_count.text().strip().replace(",", ""))
+                except (ValueError, AttributeError):
+                    total_chapters = 0  # non-critical — malformed/unexpected text shouldn't crash the scrape
 
-        tags = [tag.text().lower() for tag in tagbox.css("span")] if tagbox else []
-        summary = detailbox.css_first(".desc-wrap > span.description").text()
+        # --- optional: tags / summary ---
+        report_progress(0.72, "Extracting tags and summary...")
+        tags = [t.text().lower() for t in tagbox.css("span")] if tagbox else []
+        summary = ""
+        if detailbox is not None:
+            summary_el = detailbox.css_first(".desc-wrap > span.description")
+            summary = _optional_text(summary_el)
 
-        detailgrid_parent = (
-            detailbox.css_first("[data-slot='tabs-content']")
-            .css_first("span:lexbor-contains('details'i)")
-            .parent
-        )
-        detailgrid = detailgrid_parent.next if detailgrid_parent else None
-
-        if detailgrid:
-            status_element = detailgrid.css_first(":lexbor-contains('status'i)").next
-            author_element = detailgrid.css_first(":lexbor-contains('author'i)").next
-
-            status = status_element.text() if status_element else None
-            author = (
-                author_element.child.text()
-                if author_element and author_element.child
-                else "unknown"
+        # --- optional: status / author — guard every hop, don't hard-fail on cosmetic fields ---
+        status: str | None = None
+        author = "unknown"
+        other_author_name = "unknown"
+        if detailbox is not None:
+            tabs_content = detailbox.css_first("[data-slot='tabs-content']")
+            details_label = (
+                tabs_content.css_first("span:lexbor-contains('details'i)")
+                if tabs_content is not None
+                else None
+            )
+            detailgrid_parent = (
+                details_label.parent if details_label is not None else None
+            )
+            detailgrid = (
+                detailgrid_parent.next if detailgrid_parent is not None else None
             )
 
-            other_author_name = (
-                author_element.last_child.text()
-                if author_element and author_element.last_child
-                else "unknown"
-            )
+            if detailgrid is not None:
+                report_progress(0.8, "Extracting status and author info...")
+                status_label = detailgrid.css_first(":lexbor-contains('status'i)")
+                author_label = detailgrid.css_first(":lexbor-contains('author'i)")
+                status_element = status_label.next if status_label is not None else None
+                author_element = author_label.next if author_label is not None else None
 
+                status = _optional_text(status_element, default=None)  # type: ignore[arg-type]
+                author = _optional_text(
+                    author_element.child if author_element else None, default="unknown"
+                )
+                other_author_name = _optional_text(
+                    author_element.last_child if author_element else None,
+                    default="unknown",
+                )
+
+        # --- required: no chapter links means this scrape produced nothing useful ---
+        if not raw_chapter_links:
+            raise ValueError(
+                f"Found the novel page but no chapter links at {source_url!r}"
+            )
         links = [f"{base_url}/{x}" for x in raw_chapter_links]
+        report_progress(0.9, "Cleaning up chapter links...")
 
         return NovelMetadata(
             title=title,
@@ -108,94 +148,86 @@ class WtrLabScraper(BaseScraper):
         )
 
     async def parse_chapter(
-        self, novel_id, chapter_url, chapter_num, network_mgr
+        self,
+        novel_id,
+        chapter_url,
+        chapter_num,
+        network_mgr,
+        *,
+        report_progress: ProgressFn,
     ) -> ExtractedChapter:
+        # Intentionally not implemented yet — parse_metadata/progress is
+        # being finalized first. BaseScraper.parse_chapter is abstract with
+        # `...` as its body, so this currently returns None rather than
+        # raising or scraping anything; replace with real chapter parsing
+        # when you get to this half.
         return await super().parse_chapter(
-            novel_id, chapter_url, chapter_num, network_mgr
+            novel_id,
+            chapter_url,
+            chapter_num,
+            network_mgr,
+            report_progress=report_progress,
         )
 
     async def fetch_main_page_html_contents(
-        self, url: str, network_mgr: NetworkManager
-    ):
-        # instance = network_mgr.headless_mgr
-        initial_html_content: str = ""
+        self, url: str, network_mgr: NetworkManager, report_progress: ProgressFn
+    ) -> tuple[str, list[str]]:
         chapters: list[str] = []
-        # context = None
-        # page = None
 
         async with network_mgr.page(url) as pg:
-            try:
-                # await instance.initialize()
-                # browser = instance.browser
+            # No try/except here anymore — a real failure (navigation
+            # timeout, selector never appearing, etc.) now propagates with
+            # its actual exception/traceback instead of being converted
+            # into a ("", []) sentinel that parse_metadata used to have to
+            # re-interpret as a generic "failed to retrieve" error. The
+            # task queue's normal retry/dead-letter handling deals with
+            # this correctly either way — no need to catch it here too.
+            await pg.goto(url, wait_until="domcontentloaded", timeout=60000)
+            await pg.wait_for_selector(".chapter-details", timeout=60000)
 
-                # if not browser:
-                #     return "", []
+            initial_html_content = await pg.content()
 
-                # context = await browser.new_context(
-                #     user_agent=random.choice(network_mgr.user_agents),
-                #     viewport={"width": 1280, "height": 800},
-                # )
+            tab = pg.get_by_role("tab", name="Table of Contents")
+            await asyncio.sleep(1)
+            await tab.click()
+            await pg.wait_for_selector(".chapter-list", timeout=10000)
+            report_progress(0.2, "Checking chapters...")
 
-                # page = await context.new_page()
+            accordion_items = pg.locator("div[data-slot='accordion-item']")
+            count = await accordion_items.count()
+            accordions = await accordion_items.all()
 
-                # Navigate to the target web novel page URL
-                await pg.goto(url, wait_until="domcontentloaded", timeout=60000)
+            for idx, item in enumerate(accordions):
+                # Scaled by the REAL accordion count, mapped into 0.2-0.6 —
+                # deliberately capped well below 0.65 (the next checkpoint,
+                # back in parse_metadata, which runs AFTER this function
+                # returns). The old formula was `0.2 + (idx+1)/10`, which
+                # assumed at most ~8 accordion groups; anything past that
+                # (this scraper's own screenshot showed 689 chapters, very
+                # likely >8 groups) pushed progress past 1.0, got clamped
+                # to 100%, and then visibly regressed backward once the
+                # real 0.65/0.68/.../0.9 checkpoints fired afterward.
+                report_progress(
+                    0.2 + 0.4 * (idx + 1) / max(count, 1), "Extracting chapters..."
+                )
 
-                # Explicitly wait for javascript text frameworks to finish rendering elements into DOM
-                await pg.wait_for_selector(".chapter-details", timeout=60000)
+                trigger = item.locator("button[data-slot='accordion-trigger']")
+                await trigger.click()
 
-                initial_html_content = await pg.content()
+                anchor_elements = item.locator("div[data-slot='accordion-content'] a")
 
-                tab = pg.get_by_role("tab", name="Table of Contents")
+                try:
+                    await anchor_elements.first.wait_for(state="attached", timeout=5000)
+                except Exception:
+                    # genuinely OK to continue here — an empty accordion
+                    # group just contributes zero links, not a scrape failure
+                    pass
+
+                for a in await anchor_elements.all():
+                    link = await a.get_attribute("href")
+                    if link:
+                        chapters.append(link)
+
                 await asyncio.sleep(1)
-                await tab.click()
-                await pg.wait_for_selector(".chapter-list", timeout=10000)
 
-                accordion_items = pg.locator("div[data-slot='accordion-item']")
-                count = await accordion_items.count()
-                print(f"[+] Found {count} accordion panels to expand.")
-
-                accordions = await accordion_items.all()
-
-                if count > 0:
-                    for idx, item in enumerate(accordions):
-                        data_index = await item.get_attribute("data-index")
-                        print(
-                            f"[+] Processing accordion index: {data_index} (Loop index: {idx})"
-                        )
-
-                        trigger = item.locator("button[data-slot='accordion-trigger']")
-                        await trigger.click()
-
-                        anchor_elements = item.locator(
-                            "div[data-slot='accordion-content'] a"
-                        )
-
-                        try:
-                            await anchor_elements.first.wait_for(
-                                state="attached", timeout=5000
-                            )
-                        except Exception:
-                            print(
-                                f"[!] Warning: No links appeared in accordion {idx} after 5 seconds."
-                            )
-
-                        for a in await anchor_elements.all():
-                            link = await a.get_attribute("href")
-                            if link:
-                                chapters.append(link)
-
-                        await asyncio.sleep(1)
-
-                return initial_html_content, chapters
-
-            except Exception as exc:
-                print(f"[!] Failed to fetch HTML contents: {exc}")
-                return "", []
-
-            # finally:
-            #     if page is not None:
-            #         await page.close()
-            #     if context is not None:
-            #         await context.close()
-            #     await instance.shutdown()
+            return initial_html_content, chapters
