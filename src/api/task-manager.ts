@@ -13,7 +13,8 @@ export type Connectivity = { online: boolean };
 export type QueuePaused = { paused: boolean };
 
 export const api = {
-  scrapeNovel: (novelId: number, sourceUrl: string) => pyInvoke<void>("scrape_novel", { novelId, sourceUrl }),
+  scrapeNovel: (novelId: number, sourceUrl: string) =>
+    pyInvoke<void>("scrape_novel", { novel_id: novelId, source_url: sourceUrl }),
 
   downloadImage: (url: string, destPath: string, priority = 0) =>
     pyInvoke<string>("download_image", { url, destPath, priority }),

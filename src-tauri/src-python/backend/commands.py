@@ -6,20 +6,31 @@ into a call against manager/network_mgr (from app.py) and returns a schema
 network_manager.py, and the scraper plugins.
 """
 
-# from typing import List, Optional
+from typing import List
 
-from pytauri import Commands
+from pytauri import Commands, AppHandle, Emitter
 
 from backend.app import manager, network_mgr
 
-# from backend.plugins import ImageDownloadPayload
+from backend.plugins import ImageDownloadPayload
 from backend.scrapers.task_plugins import NovelDiscoveryPayload
 from backend.schemas import (
-    # StatsPayload,
-    # TaskPayload,
+    StatsPayload,
+    TaskPayload,
+    ResumeJobPayload,
+    ResumeTaskPayload,
+    PauseJobPayload,
+    PauseTaskPayload,
+    QueuePausedPayload,
+    RetryTaskPayload,
     ConnectivityPayload,
-    # task_payload,
-    # stats_payload,
+    RetryFailedPayload,
+    CancelJobPayload,
+    CancelTaskPayload,
+    GetJobStatsPayload,
+    GetJobTasksPayload,
+    task_payload,
+    stats_payload,
 )
 
 commands = Commands()
@@ -40,89 +51,100 @@ async def scrape_novel(body: NovelDiscoveryPayload) -> None:
     )
 
 
-# @commands.command()
-# async def download_image(url: str, dest_path: str, priority: int = 0) -> str:
-#     """Generic image download — usable outside the novel-scraping flow too
-#     (e.g. downloading a cover separately, or any other asset)."""
-#     task = await manager.enqueue(
-#         "image_download",
-#         ImageDownloadPayload(url=url, dest_path=dest_path),
-#         priority=priority,
-#     )
-#     return task.id
+@commands.command()
+async def download_image(body: ImageDownloadPayload) -> str:
+    """Generic image download — usable outside the novel-scraping flow too
+    (e.g. downloading a cover separately, or any other asset)."""
+    task = await manager.enqueue(
+        "image_download",
+        body,
+        priority=body.priority,
+    )
+    return task.id
 
 
-# @commands.command()
-# async def retry_failed(group: Optional[str] = None) -> List[str]:
-#     """Retry every DEAD (retries-exhausted) task, optionally scoped to one
-#     novel/job (group). Returns the task ids requeued."""
-#     return await manager.requeue_failed(group)
+@commands.command()
+async def retry_failed(body: RetryFailedPayload) -> List[str]:
+    """Retry every DEAD (retries-exhausted) task, optionally scoped to one
+    novel/job (group). Returns the task ids requeued."""
+    return await manager.requeue_failed(body.group)
 
 
-# @commands.command()
-# async def retry_task(task_id: str) -> bool:
-#     """Retry a single task right now, bypassing backoff."""
-#     return await manager.requeue(task_id)
+@commands.command()
+async def retry_task(body: RetryTaskPayload) -> bool:
+    """Retry a single task right now, bypassing backoff."""
+    return await manager.requeue(body.task_id)
 
 
-# @commands.command()
-# async def cancel_task(task_id: str) -> None:
-#     manager.cancel(task_id)
+@commands.command()
+async def cancel_task(body: CancelTaskPayload) -> None:
+    manager.cancel(body.task_id)
 
 
-# @commands.command()
-# async def cancel_job(group: str) -> None:
-#     manager.cancel_group(group)
+@commands.command()
+async def cancel_job(body: CancelJobPayload) -> None:
+    manager.cancel_group(body.group)
 
 
-# @commands.command()
-# async def pause_queue() -> None:
-#     """Global pause — stops ALL workers from pulling new tasks, across
-#     every novel/job. For pausing just one novel or one chapter, use
-#     pause_job/pause_task below instead."""
-#     manager.pause()
+@commands.command()
+async def pause_queue(app_handle: AppHandle) -> None:
+    """Global pause — stops ALL workers from pulling new tasks, across
+    every novel/job. For pausing just one novel or one chapter, use
+    pause_job/pause_task below instead."""
+    manager.pause()
+    Emitter.emit(app_handle, "queue-paused", QueuePausedPayload(paused=True))
 
 
-# @commands.command()
-# async def resume_queue() -> None:
-#     manager.resume()
+@commands.command()
+async def resume_queue(app_handle: AppHandle) -> None:
+    manager.resume()
+    Emitter.emit(app_handle, "queue-paused", QueuePausedPayload(paused=False))
 
 
-# @commands.command()
-# async def pause_task(task_id: str, cancel_running: bool = False) -> None:
-#     """Hold one task out of the queue. If it's currently running, the
-#     default (cancel_running=False) lets it finish naturally and only holds
-#     its *next* attempt (e.g. a queued retry); pass cancel_running=True to
-#     stop it immediately instead."""
-#     manager.pause_task(task_id, cancel_running=cancel_running)
+@commands.command()
+async def get_queue_paused() -> QueuePausedPayload:
+    """Current global-pause state — call once on app/component mount,
+    since 'queue-paused' events only fire on CHANGES, not on demand.
+    Doesn't reflect per-job/per-task pauses (pause_job/pause_task), only
+    the global pause_queue()/resume_queue() toggle."""
+    return QueuePausedPayload(paused=manager.is_paused)
 
 
-# @commands.command()
-# async def resume_task(task_id: str) -> bool:
-#     return await manager.resume_task(task_id)
+@commands.command()
+async def pause_task(body: PauseTaskPayload) -> None:
+    """Hold one task out of the queue. If it's currently running, the
+    default (cancel_running=False) lets it finish naturally and only holds
+    its *next* attempt (e.g. a queued retry); pass cancel_running=True to
+    stop it immediately instead."""
+    manager.pause_task(body.task_id, cancel_running=body.cancel_running)
 
 
-# @commands.command()
-# async def pause_job(group: str, cancel_running: bool = False) -> None:
-#     """Pause every task belonging to one novel/job, leaving other jobs
-#     running unaffected."""
-#     manager.pause_group(group, cancel_running=cancel_running)
+@commands.command()
+async def resume_task(body: ResumeTaskPayload) -> bool:
+    return await manager.resume_task(body.task_id)
 
 
-# @commands.command()
-# async def resume_job(group: str) -> List[str]:
-#     """Resume every held task in a job. Returns the task ids resumed."""
-#     return await manager.resume_group(group)
+@commands.command()
+async def pause_job(body: PauseJobPayload) -> None:
+    """Pause every task belonging to one novel/job, leaving other jobs
+    running unaffected."""
+    manager.pause_group(body.group, cancel_running=body.cancel_running)
 
 
-# @commands.command()
-# async def get_job_stats(group: Optional[str] = None) -> StatsPayload:
-#     return stats_payload(manager.stats(group))
+@commands.command()
+async def resume_job(body: ResumeJobPayload) -> List[str]:
+    """Resume every held task in a job. Returns the task ids resumed."""
+    return await manager.resume_group(body.group)
 
 
-# @commands.command()
-# async def get_job_tasks(group: str) -> List[TaskPayload]:
-#     return [task_payload(t) for t in manager.tasks_in_group(group)]
+@commands.command()
+async def get_job_stats(body: GetJobStatsPayload) -> StatsPayload:
+    return stats_payload(manager.stats(body.group))
+
+
+@commands.command()
+async def get_job_tasks(body: GetJobTasksPayload) -> List[TaskPayload]:
+    return [task_payload(t) for t in manager.tasks_in_group(body.group)]
 
 
 @commands.command()

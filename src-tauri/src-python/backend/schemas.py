@@ -43,6 +43,58 @@ class ConnectivityPayload(BaseModel):
     online: bool
 
 
+class QueuePausedPayload(BaseModel):
+    paused: bool
+
+
+class DownloadImagePayload(BaseModel):
+    url: str
+    dest_path: str
+    priority: int = 0
+
+
+class RetryFailedPayload(BaseModel):
+    group: Optional[str] = None
+
+
+class RetryTaskPayload(BaseModel):
+    task_id: str
+
+
+class CancelTaskPayload(BaseModel):
+    task_id: str
+
+
+class CancelJobPayload(BaseModel):
+    group: str
+
+
+class PauseTaskPayload(BaseModel):
+    task_id: str
+    cancel_running: bool = False
+
+
+class ResumeTaskPayload(BaseModel):
+    task_id: str
+
+
+class PauseJobPayload(BaseModel):
+    group: str
+    cancel_running: bool = False
+
+
+class ResumeJobPayload(BaseModel):
+    group: str
+
+
+class GetJobStatsPayload(BaseModel):
+    group: Optional[str] = None
+
+
+class GetJobTasksPayload(BaseModel):
+    group: str
+
+
 def task_payload(t: Task) -> TaskPayload:
     return TaskPayload(
         id=t.id,

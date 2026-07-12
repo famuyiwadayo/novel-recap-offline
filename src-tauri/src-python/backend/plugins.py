@@ -60,6 +60,7 @@ class ImageDownloadPayload:
     url: str
     dest_path: str
     overwrite: bool = False
+    priority: int = 0
 
 
 class ImageDownloadPlugin(Plugin):
