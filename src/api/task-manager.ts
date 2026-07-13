@@ -45,4 +45,5 @@ export const api = {
   getNovel: (novelId: number) => pyInvoke<Novel | null>("get_novel", { novel_id: novelId }),
   getNovelChapters: (novelId: number) => pyInvoke<Chapter[]>("get_novel_chapters", { novel_id: novelId }),
   deleteNovel: (novelId: number) => pyInvoke<void>("delete_novel", { novel_id: novelId }),
+  resumeNovel: (novelId: number) => pyInvoke<void>("resume_novel", { novel_id: novelId }),
 };

@@ -1,5 +1,3 @@
-// queries.ts
-//
 // useQuery hooks for read commands, useMutation hooks for write/command
 // ones. Command mutations (pause/resume/cancel/retry) don't have "data"
 // to cache, but useMutation still replaces the manual `busy` useState +
@@ -56,6 +54,18 @@ export function useDeleteNovelMutation() {
     onSuccess: (_data, novelId) => {
       queryClient.invalidateQueries({ queryKey: queryKeys.novels });
       queryClient.removeQueries({ queryKey: queryKeys.novel(novelId) });
+    },
+  });
+}
+
+export function useResumeNovelMutation() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (novelId: number) => api.resumeNovel(novelId),
+    onSuccess: (_data, novelId) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.novel(novelId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.novelChapters(novelId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.novels });
     },
   });
 }

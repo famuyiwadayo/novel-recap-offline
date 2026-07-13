@@ -4,10 +4,16 @@
 // to this novel's group.
 
 import { useMemo } from "react";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import type { Task } from "@/types";
 import { useTasks, useStatsByGroup } from "@/stores";
-import { useNovelQuery, useNovelChaptersQuery, useRetryFailedMutation } from "@/queries";
+import {
+  useNovelQuery,
+  useNovelChaptersQuery,
+  useRetryFailedMutation,
+  useDeleteNovelMutation,
+  useResumeNovelMutation,
+} from "@/queries";
 
 export const Route = createFileRoute("/novel/$novelId")({
   component: NovelDetailPage,
@@ -27,10 +33,13 @@ function NovelDetailPage() {
   const { novelId } = Route.useParams();
   const novelIdNum = Number(novelId);
   const group = novelId; // group is str(novel_id) throughout the backend
+  const navigate = useNavigate();
 
   const { data: novel, isLoading: novelLoading } = useNovelQuery(novelIdNum);
-  const { data: downloaded_chapters = [] } = useNovelChaptersQuery(novelIdNum);
+  const { data: downloadedChapters = [] } = useNovelChaptersQuery(novelIdNum);
   const retryFailed = useRetryFailedMutation();
+  const deleteNovel = useDeleteNovelMutation();
+  const resumeNovel = useResumeNovelMutation();
 
   const tasks = useTasks();
   const statsByGroup = useStatsByGroup();
@@ -46,6 +55,7 @@ function NovelDetailPage() {
   );
 
   const hasDead = (stats?.dead ?? 0) > 0;
+  const isIncomplete = novel?.scrape_state && novel.scrape_state !== "complete";
 
   if (novelLoading) {
     return <main className="mx-auto max-w-3xl px-6 py-6 text-sm text-slate-500">Loading…</main>;
@@ -73,7 +83,7 @@ function NovelDetailPage() {
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-semibold text-slate-100 text-left">{novel.title ?? "Untitled"}</h1>
+          <h1 className="text-xl font-semibold text-slate-100">{novel.title ?? "Untitled"}</h1>
           <p className="mt-0.5 text-sm text-slate-400">
             {novel.author.filter(Boolean).join(", ") || "Unknown author"}
           </p>
@@ -99,16 +109,38 @@ function NovelDetailPage() {
                 {retryFailed.isPending ? "Retrying…" : `Retry ${stats?.dead} failed`}
               </button>
             )}
+            {isIncomplete && (
+              <button
+                type="button"
+                disabled={resumeNovel.isPending}
+                onClick={() => resumeNovel.mutate(novelIdNum)}
+                title="Re-checks for any missing chapters or cover image and re-downloads them — safe to click anytime, including if nothing's actually missing."
+                className="rounded-md bg-slate-800 px-3 py-1.5 text-xs font-medium text-slate-300 hover:bg-slate-700 disabled:opacity-50"
+              >
+                {resumeNovel.isPending ? "Checking…" : "Resume downloads"}
+              </button>
+            )}
             <span className="text-xs text-slate-500">
               {novel.downloaded_chapters}/{novel.total_chapters || "?"} chapters downloaded
             </span>
+            <button
+              type="button"
+              disabled={deleteNovel.isPending}
+              onClick={() => {
+                if (!window.confirm(`Delete "${novel.title ?? "this novel"}" and all downloaded chapters? This can't be undone.`)) return;
+                deleteNovel.mutate(novelIdNum, { onSuccess: () => navigate({ to: "/" }) });
+              }}
+              className="ml-auto rounded-md px-3 py-1.5 text-xs font-medium text-slate-500 hover:bg-rose-500/10 hover:text-rose-300 disabled:opacity-50"
+            >
+              {deleteNovel.isPending ? "Deleting…" : "Delete"}
+            </button>
           </div>
         </div>
       </div>
 
       <h2 className="mb-2 mt-8 text-sm font-semibold text-slate-300">Chapters</h2>
       <ul className="divide-y divide-slate-800/80 rounded-lg border border-slate-800">
-        {downloaded_chapters.map((c) => (
+        {downloadedChapters.map((c) => (
           <li key={c.chapter_number} className="flex items-center gap-2 px-3 py-2 text-sm">
             <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
             <span className="min-w-0 flex-1 truncate text-slate-200">
@@ -127,7 +159,7 @@ function NovelDetailPage() {
               </li>
             );
           })}
-        {downloaded_chapters.length === 0 && liveChapterTasks.length === 0 && (
+        {downloadedChapters.length === 0 && liveChapterTasks.length === 0 && (
           <li className="px-3 py-6 text-center text-sm text-slate-500">
             No chapters yet — discovery may still be in progress.
           </li>
@@ -136,3 +168,5 @@ function NovelDetailPage() {
     </main>
   );
 }
+
+
