@@ -73,7 +73,7 @@ function NovelDetailPage() {
           )}
         </div>
         <div className="min-w-0 flex-1">
-          <h1 className="text-xl font-semibold text-slate-100">{novel.title ?? "Untitled"}</h1>
+          <h1 className="text-xl text-left font-semibold text-slate-100">{novel.title ?? "Untitled"}</h1>
           <p className="mt-0.5 text-sm text-slate-400">
             {novel.author.filter(Boolean).join(", ") || "Unknown author"}
           </p>

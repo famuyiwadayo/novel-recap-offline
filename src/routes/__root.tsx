@@ -6,7 +6,7 @@
 
 import { createRootRoute, Link, Outlet } from "@tanstack/react-router";
 import { useOnline } from "@/stores";
-import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
+// import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 
 function ConnectivityBanner() {
     const online = useOnline();
@@ -52,7 +52,7 @@ export const Route = createRootRoute({
                 </div>
             </header>
             <Outlet />
-            <TanStackRouterDevtools />
+            {/* <TanStackRouterDevtools /> */}
         </div>
     ),
 });
