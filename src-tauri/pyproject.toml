@@ -15,6 +15,7 @@ dependencies = [
     "selectolax>=0.4.10",
     "aiosqlite>=0.22.1",
     "playwright-stealth>=2.0.3",
+    "requests>=2.32.5",
 ]
 
 [project.entry-points.pytauri]

@@ -28,13 +28,12 @@ Two things are NOT this module's job, on purpose:
 
 from __future__ import annotations
 
-import os
-import re
 from dataclasses import dataclass
 from typing import Any, Protocol, Union, runtime_checkable
 
-# from anyio import to_thread
+from anyio import to_thread
 
+from backend.managers.app_paths import app_paths
 from backend.scrapers.base import NovelMetadata, ExtractedChapter
 from backend.managers.task_queue import Plugin, PluginResult, ProgressFn, Task
 
@@ -104,14 +103,26 @@ class ChapterFetchPayload:
 # ============================================================================
 
 
-def _default_persist_chapter(chapter: Any) -> None:
-    """chapter is an ExtractedChapter (novel_id, chapter_number, title, content, source_url)."""
-    safe_title = re.sub(r"[^\w\-. ]", "_", chapter.title)[:80]
-    dir_path = os.path.join("scraped", str(chapter.novel_id))
-    os.makedirs(dir_path, exist_ok=True)
-    path = os.path.join(dir_path, f"{chapter.chapter_number:04d}_{safe_title}.txt")
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(chapter.content_lines.join("\n\n"))
+def _default_persist_chapter(chapter: Any) -> str:
+    """chapter is an ExtractedChapter (novel_id, chapter_number, title, content, source_url).
+    Returns the path written to — RegistryChapterFetchPlugin includes
+    this in its PluginResult so app.py's persistence listener can record
+    WHERE each chapter lives (needed for delete_novel's file cleanup, and
+    for diagnostics), not just THAT it's downloaded.
+
+    Uses app_paths (configured once in app.py's wire_events(), from the
+    real OS app-data directory) rather than a hardcoded relative path —
+    a bare "scraped/..." would land wherever the process's CWD happens
+    to be, not somewhere the app can reliably find it again later."""
+
+    lines: list[str] = chapter.content_lines
+
+    path = app_paths.chapter_path(
+        chapter.novel_id, chapter.chapter_number, chapter.title
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n\n".join(lines), encoding="utf-8")
+    return str(path)
 
 
 # ============================================================================
@@ -198,11 +209,18 @@ class RegistryChapterFetchPlugin(Plugin):
         report_progress(1.0, f"Extracted {len(chapter.content_lines)} lines")
 
         # persistence is blocking file/DB I/O — offload, doesn't touch network_mgr
-        # await to_thread.run_sync(self._persist_chapter, chapter)
-        report_progress(1.0, "Done")
+        content_path = await to_thread.run_sync(self._persist_chapter, chapter)
+        report_progress(1.0, "done")
 
         # deliberately NOT returning chapter.content in result.data — it can
-        # be large and it's already persisted; keep the queue's footprint small
+        # be large and it's already persisted; keep the queue's footprint small.
+        # content_path IS included though — app.py's persistence listener
+        # needs it to record where each chapter lives on disk.
         return PluginResult(
-            data={"title": chapter.title, "content_lines": len(chapter.content_lines)}
+            data={
+                "title": chapter.title,
+                "lines": len(chapter.content_lines),
+                "chars": len("\n".join(chapter.content_lines)),
+                "content_path": content_path,
+            }
         )

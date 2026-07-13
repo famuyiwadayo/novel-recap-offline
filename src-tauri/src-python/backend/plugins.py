@@ -95,3 +95,14 @@ class ImageDownloadPlugin(Plugin):
         return PluginResult(
             data={"path": payload.dest_path, "bytes": len(data), "skipped": False}
         )
+
+
+class NovelCoverDownloadPlugin(ImageDownloadPlugin):
+    """Identical behavior to ImageDownloadPlugin — exists as a separate
+    `kind` purely so app.py's persistence listener can tell "this
+    image_download was a novel's cover art" apart from an arbitrary
+    standalone download_image() call, without needing a marker field on
+    the payload itself. Register both plugins; enqueue cover downloads
+    under THIS kind, everything else under "image_download"."""
+
+    kind = "novel_cover_download"

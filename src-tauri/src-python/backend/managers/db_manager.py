@@ -212,9 +212,24 @@ class DBManager:
         rows = await cursor.fetchall()
         return [_row_to_novel(r) for r in rows]
 
+    async def get_novels_needing_reconciliation(self) -> List[NovelRecord]:
+        """Novels whose scrape was left incomplete — 'pending'/'discovering'
+        means discovery itself never finished; 'downloading' means some
+        chapters (or the cover) might be missing. Call this once at app
+        startup and re-enqueue whatever's missing for each — this is what
+        makes an interrupted download (crash, force-quit, unhandled bug)
+        self-correct on next launch instead of silently staying stuck."""
+        cursor = await self.conn.execute(
+            "SELECT * FROM novels WHERE scrape_state IN ('pending', 'discovering', 'downloading') "
+            "ORDER BY updated_at ASC"
+        )
+        rows = await cursor.fetchall()
+        return [_row_to_novel(r) for r in rows]
+
     async def update_novel_metadata(self, novel_id: int, metadata: Any) -> None:
         """metadata is a NovelMetadata (scrapers/base.py) — call once
-        novel_discovery succeeds."""
+        novel_discovery succeeds. Does NOT seed chapter placeholder rows —
+        call seed_chapters() separately with metadata.chapter_urls."""
         await self.conn.execute(
             """UPDATE novels SET
                 title = ?, author = ?, other_titles = ?, tags = ?, summary = ?,
@@ -252,10 +267,29 @@ class DBManager:
         await self.conn.commit()
 
     async def delete_novel(self, novel_id: int) -> None:
+        """Deletes DB rows only (chapters cascade via FK) — does NOT touch
+        files on disk. Callers that need to clean up chapter content
+        files / the cover image must call get_all_chapters()/get_novel()
+        FIRST to collect paths, delete files, THEN call this — see
+        commands.py's delete_novel command for the full sequence."""
         await self.conn.execute("DELETE FROM novels WHERE id = ?", (novel_id,))
         await self.conn.commit()
 
     # --- chapters -----------------------------------------------------
+
+    async def seed_chapters(self, novel_id: int, chapter_urls: List[str]) -> None:
+        """Call once alongside update_novel_metadata, right after
+        discovery succeeds — inserts one placeholder row per chapter
+        (source_url known, downloaded_at NULL) so the full chapter list
+        is queryable and reconcilable even before any chapter has
+        actually been fetched. INSERT OR IGNORE: safe to call again for
+        an already-seeded novel (e.g. re-running discovery) without
+        clobbering chapters that have since been downloaded."""
+        await self.conn.executemany(
+            "INSERT OR IGNORE INTO chapters (novel_id, chapter_number, source_url) VALUES (?, ?, ?)",
+            [(novel_id, i + 1, url) for i, url in enumerate(chapter_urls)],
+        )
+        await self.conn.commit()
 
     async def upsert_chapter(
         self,
@@ -263,27 +297,68 @@ class DBManager:
         chapter_number: int,
         title: Optional[str],
         source_url: Optional[str],
+        content_path: Optional[str],
     ) -> None:
         """Call once a chapter_fetch task succeeds. Recomputes
         downloaded_chapters on the parent novel from an actual COUNT
-        rather than incrementing, so it self-corrects if a chapter is ever
-        re-downloaded or the app restarts mid-job."""
+        rather than incrementing, so it self-corrects regardless of call
+        order or duplicate calls. Also auto-transitions the novel to
+        'complete' once every seeded chapter has downloaded_at set —
+        no separate "check if done" step needed anywhere else."""
+
         await self.conn.execute(
-            """INSERT INTO chapters (novel_id, chapter_number, title, source_url, downloaded_at)
-               VALUES (?, ?, ?, ?, ?)
+            """INSERT INTO chapters (novel_id, chapter_number, title, source_url, content_path, downloaded_at)
+               VALUES (?, ?, ?, ?, ?, ?)
                ON CONFLICT(novel_id, chapter_number) DO UPDATE SET
                  title = excluded.title, source_url = excluded.source_url,
-                 downloaded_at = excluded.downloaded_at""",
-            (novel_id, chapter_number, title, source_url, _now()),
+                 content_path = excluded.content_path, downloaded_at = excluded.downloaded_at""",
+            (novel_id, chapter_number, title, source_url, content_path, _now()),
         )
+        cursor = await self.conn.execute(
+            "SELECT COUNT(*) AS downloaded, "
+            "(SELECT COUNT(*) FROM chapters WHERE novel_id = ?) AS total "
+            "FROM chapters WHERE novel_id = ? AND downloaded_at IS NOT NULL",
+            (novel_id, novel_id),
+        )
+
+        row = await cursor.fetchone()
+        downloaded, total = row["downloaded"] if row else 0, row["total"] if row else 0
+        is_complete = total > 0 and downloaded >= total
         await self.conn.execute(
-            "UPDATE novels SET downloaded_chapters = "
-            "(SELECT COUNT(*) FROM chapters WHERE novel_id = ?), updated_at = ? WHERE id = ?",
-            (novel_id, _now(), novel_id),
+            "UPDATE novels SET downloaded_chapters = ?, updated_at = ?, "
+            "scrape_state = CASE WHEN ? THEN 'complete' ELSE scrape_state END "
+            "WHERE id = ?",
+            (downloaded, _now(), is_complete, novel_id),
         )
         await self.conn.commit()
 
     async def get_chapters(self, novel_id: int) -> List[ChapterRecord]:
+        """Only DOWNLOADED chapters — this is the contract the frontend's
+        novel detail page relies on. For chapters that SHOULD exist but
+        haven't been downloaded yet, see get_missing_chapters()."""
+        cursor = await self.conn.execute(
+            "SELECT * FROM chapters WHERE novel_id = ? AND downloaded_at IS NOT NULL ORDER BY chapter_number",
+            (novel_id,),
+        )
+        rows = await cursor.fetchall()
+        return [_row_to_chapter(r) for r in rows]
+
+    async def get_missing_chapters(self, novel_id: int) -> List[ChapterRecord]:
+        """Seeded but not yet downloaded — the reconciliation query.
+        source_url is always populated for these (seeded from discovery),
+        so each result has everything needed to re-enqueue a
+        chapter_fetch task for it."""
+        cursor = await self.conn.execute(
+            "SELECT * FROM chapters WHERE novel_id = ? AND downloaded_at IS NULL ORDER BY chapter_number",
+            (novel_id,),
+        )
+        rows = await cursor.fetchall()
+        return [_row_to_chapter(r) for r in rows]
+
+    async def get_all_chapters(self, novel_id: int) -> List[ChapterRecord]:
+        """Downloaded AND pending — for cleanup (delete_novel needs every
+        content_path that might exist on disk) or diagnostics, not for
+        the frontend's chapter list."""
         cursor = await self.conn.execute(
             "SELECT * FROM chapters WHERE novel_id = ? ORDER BY chapter_number",
             (novel_id,),
