@@ -10,7 +10,13 @@
 
 import { useMemo, useState } from "react";
 import type { TaskStats, Task } from "@/types";
-import { api } from "@/api/task-manager";
+import {
+    useRetryFailedMutation,
+    useRetryTaskMutation,
+    usePauseJobMutation,
+    useResumeJobMutation,
+    useCancelJobMutation,
+} from "@/queries";
 
 const STATE_STYLES: Record<
     Task["state"],
@@ -70,7 +76,14 @@ type NovelJobCardProps = {
 
 export function NovelJobCard({ group, discoveryTask, chapterTasks, stats }: NovelJobCardProps) {
     const [expanded, setExpanded] = useState(false);
-    const [busy, setBusy] = useState(false);
+
+    const retryFailed = useRetryFailedMutation();
+    const retryTask = useRetryTaskMutation();
+    const pauseJob = usePauseJobMutation();
+    const resumeJob = useResumeJobMutation();
+    const cancelJob = useCancelJobMutation();
+
+    const anyBusy = retryFailed.isPending || pauseJob.isPending || resumeJob.isPending || cancelJob.isPending;
 
     const sortedChapters = useMemo(
         () => [...chapterTasks].sort((a, b) => a.priority - b.priority),
@@ -84,15 +97,6 @@ export function NovelJobCard({ group, discoveryTask, chapterTasks, stats }: Nove
 
     const isJobPaused = (stats?.paused ?? 0) > 0 && (stats?.running ?? 0) === 0 && (stats?.queued ?? 0) === 0;
     const hasDead = (stats?.dead ?? 0) > 0;
-
-    async function withBusy(fn: () => Promise<unknown>) {
-        setBusy(true);
-        try {
-            await fn();
-        } finally {
-            setBusy(false);
-        }
-    }
 
     return (
         <div className="rounded-xl border border-slate-800 bg-slate-900/60 p-4 shadow-sm shadow-black/20">
@@ -109,8 +113,8 @@ export function NovelJobCard({ group, discoveryTask, chapterTasks, stats }: Nove
                     {hasDead && (
                         <button
                             type="button"
-                            disabled={busy}
-                            onClick={() => withBusy(() => api.retryFailed(group))}
+                            disabled={anyBusy}
+                            onClick={() => retryFailed.mutate(group)}
                             className="rounded-md bg-rose-500/10 px-2 py-1 text-xs font-medium text-rose-300 ring-1 ring-inset ring-rose-500/30 transition hover:bg-rose-500/20 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
                         >
                             Retry failed ({stats?.dead})
@@ -118,18 +122,16 @@ export function NovelJobCard({ group, discoveryTask, chapterTasks, stats }: Nove
                     )}
                     <button
                         type="button"
-                        disabled={busy}
-                        onClick={() =>
-                            withBusy(() => (isJobPaused ? api.resumeJob(group) : api.pauseJob(group)))
-                        }
+                        disabled={anyBusy}
+                        onClick={() => (isJobPaused ? resumeJob.mutate(group) : pauseJob.mutate({ group }))}
                         className="rounded-md bg-slate-800 px-2 py-1 text-xs font-medium text-slate-300 transition hover:bg-slate-700 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-teal-400"
                     >
                         {isJobPaused ? "Resume" : "Pause"}
                     </button>
                     <button
                         type="button"
-                        disabled={busy}
-                        onClick={() => withBusy(() => api.cancelJob(group))}
+                        disabled={anyBusy}
+                        onClick={() => cancelJob.mutate(group)}
                         className="rounded-md bg-slate-800 px-2 py-1 text-xs font-medium text-slate-400 transition hover:bg-rose-500/20 hover:text-rose-300 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
                         aria-label="Cancel this job"
                     >
@@ -201,8 +203,9 @@ export function NovelJobCard({ group, discoveryTask, chapterTasks, stats }: Nove
                                 {t.state === "DEAD" && (
                                     <button
                                         type="button"
-                                        onClick={() => api.retryTask(t.id)}
-                                        className="rounded px-1.5 py-0.5 text-[11px] font-medium text-rose-300 ring-1 ring-inset ring-rose-500/30 hover:bg-rose-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                                        disabled={retryTask.isPending}
+                                        onClick={() => retryTask.mutate(t.id)}
+                                        className="rounded px-1.5 py-0.5 text-[11px] font-medium text-rose-300 ring-1 ring-inset ring-rose-500/30 hover:bg-rose-500/20 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
                                     >
                                         Retry
                                     </button>
