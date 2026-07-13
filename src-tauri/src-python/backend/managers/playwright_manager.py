@@ -29,7 +29,7 @@ from playwright.async_api import async_playwright, Browser, BrowserContext, Play
 
 
 class PlaywrightManager:
-    def __init__(self, headless: bool = True, max_contexts: int = 5) -> None:
+    def __init__(self, headless: bool = False, max_contexts: int = 5) -> None:
         self._headless = headless
         self._max_contexts = max_contexts
         self._playwright: Optional[Playwright] = None
@@ -43,7 +43,15 @@ class PlaywrightManager:
         # channel="chromium" here to opt into the same engine as chromium-headless-shell
         # by default; swap to channel="msedge" if you want to piggyback on a
         # system-installed Edge instead of bundling a browser at all.
-        self._browser = await self._playwright.chromium.launch(headless=self._headless)
+        self._browser = await self._playwright.chromium.launch(
+            headless=self._headless,
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--disable-infobars",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+            ],
+        )
 
     async def stop(self) -> None:
         async with self._pool_lock:

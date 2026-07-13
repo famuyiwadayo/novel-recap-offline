@@ -31,10 +31,11 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from typing import Optional, Any, Protocol, Union, runtime_checkable
+from typing import Any, Protocol, Union, runtime_checkable
 
-from anyio import to_thread
+# from anyio import to_thread
 
+from backend.scrapers.base import NovelMetadata, ExtractedChapter
 from backend.managers.task_queue import Plugin, PluginResult, ProgressFn, Task
 
 
@@ -51,7 +52,7 @@ class ScraperLike(Protocol):
         network_mgr: Any,
         *,
         report_progress: ProgressFn,
-    ) -> Any: ...
+    ) -> NovelMetadata: ...
     async def parse_chapter(
         self,
         novel_id: Any,
@@ -60,7 +61,7 @@ class ScraperLike(Protocol):
         network_mgr: Any,
         *,
         report_progress: ProgressFn,
-    ) -> Any: ...
+    ) -> ExtractedChapter: ...
 
 
 @runtime_checkable
@@ -110,7 +111,7 @@ def _default_persist_chapter(chapter: Any) -> None:
     os.makedirs(dir_path, exist_ok=True)
     path = os.path.join(dir_path, f"{chapter.chapter_number:04d}_{safe_title}.txt")
     with open(path, "w", encoding="utf-8") as f:
-        f.write(chapter.content)
+        f.write(chapter.content_lines.join("\n\n"))
 
 
 # ============================================================================
@@ -185,6 +186,8 @@ class RegistryChapterFetchPlugin(Plugin):
         if scraper is None:
             raise NoScraperFound(f"No scraper registered for {payload.chapter_url!r}")
 
+        report_progress(0.1, f"Using {type(scraper).__name__}")
+
         chapter = await scraper.parse_chapter(
             payload.novel_id,
             payload.chapter_url,
@@ -192,12 +195,14 @@ class RegistryChapterFetchPlugin(Plugin):
             self._network_mgr,
             report_progress=report_progress,
         )
+        report_progress(1.0, f"Extracted {len(chapter.content_lines)} lines")
+
         # persistence is blocking file/DB I/O — offload, doesn't touch network_mgr
-        await to_thread.run_sync(self._persist_chapter, chapter)
-        report_progress(1.0, "done")
+        # await to_thread.run_sync(self._persist_chapter, chapter)
+        report_progress(1.0, "Done")
 
         # deliberately NOT returning chapter.content in result.data — it can
         # be large and it's already persisted; keep the queue's footprint small
         return PluginResult(
-            data={"title": chapter.title, "chars": len(chapter.content)}
+            data={"title": chapter.title, "content_lines": len(chapter.content_lines)}
         )

@@ -10,7 +10,7 @@ class ExtractedChapter(BaseModel):
     novel_id: int
     chapter_number: int
     title: str
-    content: str
+    content_lines: list[str]
     source_url: str
 
 
@@ -51,7 +51,7 @@ class BaseScraper(BaseModel):
     @abstractmethod
     async def parse_chapter(
         self,
-        novel_id: str,
+        novel_id: int,
         chapter_url: str,
         chapter_num: int,
         network_mgr,

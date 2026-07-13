@@ -153,29 +153,75 @@ class WtrLabScraper(BaseScraper):
         novel_id,
         chapter_url,
         chapter_num,
-        network_mgr,
+        network_mgr: NetworkManager,
         *,
         report_progress: ProgressFn,
     ) -> ExtractedChapter:
-        # Intentionally not implemented yet — parse_metadata/progress is
-        # being finalized first. BaseScraper.parse_chapter is abstract with
-        # `...` as its body, so this currently returns None rather than
-        # raising or scraping anything; replace with real chapter parsing
-        # when you get to this half.
-        return await super().parse_chapter(
-            novel_id,
-            chapter_url,
-            chapter_num,
-            network_mgr,
-            report_progress=report_progress,
-        )
+
+        async with network_mgr.page(
+            chapter_url, "domcontentloaded", timeout_ms=60000
+        ) as pg:
+            await pg.wait_for_selector(".chapter-infinite-reader", timeout=60000)
+
+            report_progress(0.1, "Extracting chapter title...")
+            chapter_content_selector = (
+                f".chapter-container#chapter-{chapter_num} .chapter-body .wtr-line"
+            )
+
+            title_el = await pg.query_selector(".chapter-container span")
+            title_txt = await title_el.text_content() if title_el else "Unknown"
+            title = title_txt if title_txt else "Unknown"
+
+            try:
+                report_progress(0.3, "Waiting for chapter content...")
+                await pg.wait_for_selector(chapter_content_selector, timeout=5000)
+            except Exception:
+                service_options = pg.locator(".display-config a[role='button']")
+                tabs = await service_options.all()
+                tabs.reverse()
+
+                for tab in tabs:
+                    is_pressed = await tab.get_attribute("data-pressed")
+                    # text_content = await tab.text_content()
+                    # print(
+                    #     f"{text_content} - Is Pressed: {True if is_pressed is not None else False}"
+                    # )
+                    if is_pressed is None:
+                        pass
+                    await tab.click()
+
+                    try:
+                        await pg.wait_for_selector(
+                            chapter_content_selector, timeout=5000
+                        )
+                    except Exception:
+                        pass
+
+            report_progress(0.65, "Extracting chapter contents...")
+            texts = pg.locator(chapter_content_selector)
+            text_lines = await texts.all()
+            lines: list[str] = []
+            for line in text_lines:
+                text = await line.text_content()
+                if text is not None:
+                    lines.append(text)
+
+            report_progress(0.9, "Wraping up...")
+
+            return ExtractedChapter(
+                novel_id=novel_id,
+                source_url=chapter_url,
+                title=title,
+                chapter_number=chapter_num,
+                content_lines=lines,
+            )
 
     async def fetch_main_page_html_contents(
         self, url: str, network_mgr: NetworkManager, report_progress: ProgressFn
     ) -> tuple[str, list[str]]:
         chapters: list[str] = []
 
-        async with network_mgr.page(url) as pg:
+        async with network_mgr.page(url, "domcontentloaded", timeout_ms=60000) as pg:
             # No try/except here anymore — a real failure (navigation
             # timeout, selector never appearing, etc.) now propagates with
             # its actual exception/traceback instead of being converted
@@ -183,7 +229,7 @@ class WtrLabScraper(BaseScraper):
             # re-interpret as a generic "failed to retrieve" error. The
             # task queue's normal retry/dead-letter handling deals with
             # this correctly either way — no need to catch it here too.
-            await pg.goto(url, wait_until="domcontentloaded", timeout=60000)
+            # await pg.goto(url, wait_until="domcontentloaded", timeout=60000)
             await pg.wait_for_selector(".chapter-details", timeout=60000)
 
             initial_html_content = await pg.content()

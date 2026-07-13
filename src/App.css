@@ -19,6 +19,8 @@
 
 body {
   margin: 0;
+  overscroll-behavior: contain;
+  background:rgba(0, 0, 0, 0.2)
 }
 
 .container {

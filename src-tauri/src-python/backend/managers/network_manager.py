@@ -22,11 +22,12 @@ from __future__ import annotations
 
 import inspect
 import socket
+import anyio
+from anyio import to_thread
 from contextlib import asynccontextmanager
 from typing import Any, Callable, List, Optional, Literal
 
-import anyio
-from anyio import to_thread
+from playwright_stealth import Stealth
 
 from .playwright_manager import PlaywrightManager
 
@@ -70,6 +71,7 @@ class NetworkManager:
         self._online_event.set()
         self._listeners: List[ConnectivityListener] = []
         self._monitor_scope: Optional[anyio.CancelScope] = None
+        self._stealth = Stealth()
 
     # --- connectivity -------------------------------------------------------
 
@@ -133,6 +135,8 @@ class NetworkManager:
     ) -> str:
         await self.wait_until_online()
         ctx = await self._pw.acquire_context()
+        await self._stealth.apply_stealth_async(ctx)
+
         try:
             page = await ctx.new_page()
             try:
@@ -161,6 +165,8 @@ class NetworkManager:
         """
         await self.wait_until_online()
         ctx = await self._pw.acquire_context()
+        await self._stealth.apply_stealth_async(ctx)
+
         try:
             pg = await ctx.new_page()
             try:
