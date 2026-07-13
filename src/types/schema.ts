@@ -21,27 +21,27 @@ export interface ExtractedChapter {
 
 export type Novel = {
   id: number;
-  sourceUrl: string;
+  source_url: string;
   title: string | null;
   author: string[];
-  otherTitles: string[];
+  other_titles: string[];
   tags: string[];
   summary: string | null;
   status: string | null;
-  coverImageUrl: string | null;
-  coverImagePath: string | null;
-  totalChapters: number;
-  downloadedChapters: number;
-  scrapeState: "pending" | "discovering" | "downloading" | "complete" | "error";
-  addedAt: string;
-  updatedAt: string;
+  cover_image_url: string | null;
+  cover_image_path: string | null;
+  total_chapters: number;
+  downloaded_chapters: number;
+  scrape_state: "pending" | "discovering" | "downloading" | "complete" | "error";
+  added_at: string;
+  updated_at: string;
 };
 
 export type Chapter = {
-  novelId: number;
-  chapterNumber: number;
+  novel_id: number;
+  chapter_number: number;
   title: string | null;
-  sourceUrl: string | null;
-  contentPath: string | null;
-  downloadedAt: string | null;
+  source_url: string | null;
+  content_path: string | null;
+  downloaded_at: string | null;
 };

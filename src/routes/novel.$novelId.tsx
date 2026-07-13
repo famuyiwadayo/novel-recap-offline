@@ -29,7 +29,7 @@ function NovelDetailPage() {
   const group = novelId; // group is str(novel_id) throughout the backend
 
   const { data: novel, isLoading: novelLoading } = useNovelQuery(novelIdNum);
-  const { data: downloadedChapters = [] } = useNovelChaptersQuery(novelIdNum);
+  const { data: downloaded_chapters = [] } = useNovelChaptersQuery(novelIdNum);
   const retryFailed = useRetryFailedMutation();
 
   const tasks = useTasks();
@@ -62,9 +62,9 @@ function NovelDetailPage() {
     <main className="mx-auto max-w-3xl px-6 py-6">
       <div className="flex gap-5">
         <div className="w-32 shrink-0">
-          {novel.coverImagePath || novel.coverImageUrl ? (
+          {novel.cover_image_path || novel.cover_image_url ? (
             <img
-              src={novel.coverImagePath ?? novel.coverImageUrl ?? undefined}
+              src={novel.cover_image_path ?? novel.cover_image_url ?? undefined}
               alt=""
               className="aspect-2/3 w-full rounded-lg object-cover shadow-lg shadow-black/40"
             />
@@ -100,7 +100,7 @@ function NovelDetailPage() {
               </button>
             )}
             <span className="text-xs text-slate-500">
-              {novel.downloadedChapters}/{novel.totalChapters || "?"} chapters downloaded
+              {novel.downloaded_chapters}/{novel.total_chapters || "?"} chapters downloaded
             </span>
           </div>
         </div>
@@ -108,11 +108,11 @@ function NovelDetailPage() {
 
       <h2 className="mb-2 mt-8 text-sm font-semibold text-slate-300">Chapters</h2>
       <ul className="divide-y divide-slate-800/80 rounded-lg border border-slate-800">
-        {downloadedChapters.map((c) => (
-          <li key={c.chapterNumber} className="flex items-center gap-2 px-3 py-2 text-sm">
+        {downloaded_chapters.map((c) => (
+          <li key={c.chapter_number} className="flex items-center gap-2 px-3 py-2 text-sm">
             <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
             <span className="min-w-0 flex-1 truncate text-slate-200">
-              {c.chapterNumber}. {c.title ?? `Chapter ${c.chapterNumber}`}
+              {c.chapter_number}. {c.title ?? `Chapter ${c.chapter_number}`}
             </span>
           </li>
         ))}
@@ -127,7 +127,7 @@ function NovelDetailPage() {
               </li>
             );
           })}
-        {downloadedChapters.length === 0 && liveChapterTasks.length === 0 && (
+        {downloaded_chapters.length === 0 && liveChapterTasks.length === 0 && (
           <li className="px-3 py-6 text-center text-sm text-slate-500">
             No chapters yet — discovery may still be in progress.
           </li>

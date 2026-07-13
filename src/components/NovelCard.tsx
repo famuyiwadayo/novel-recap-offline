@@ -10,7 +10,7 @@
 import { Link } from "@tanstack/react-router";
 import type { Novel, TaskStats } from "@/types";
 
-const STATE_LABEL: Record<Novel["scrapeState"], string> = {
+const STATE_LABEL: Record<Novel["scrape_state"], string> = {
     pending: "Queued",
     discovering: "Finding chapters…",
     downloading: "Downloading…",
@@ -19,13 +19,13 @@ const STATE_LABEL: Record<Novel["scrapeState"], string> = {
 };
 
 function CoverArt({ novel }: { novel: Novel }) {
-    const src = novel.coverImagePath ?? novel.coverImageUrl;
+    const src = novel.cover_image_path ?? novel.cover_image_url;
     if (src) {
         return (
             <img
                 src={src}
                 alt=""
-                className="aspect-[2/3] w-full rounded-lg object-cover shadow-lg shadow-black/40 ring-1 ring-white/5"
+                className="aspect-2/3 w-full rounded-lg object-cover shadow-lg shadow-black/40 ring-1 ring-white/5"
                 loading="lazy"
             />
         );
@@ -33,7 +33,7 @@ function CoverArt({ novel }: { novel: Novel }) {
     // placeholder: initials on a deterministic-but-varied tint, so an empty
     // library still reads as a shelf of distinct books rather than a wall
     // of identical gray boxes
-    const label = novel.title ?? novel.sourceUrl;
+    const label = novel.title ?? novel.source_url;
     const hue = Math.abs(hashCode(label)) % 360;
     const initials = (novel.title ?? "?")
         .split(/\s+/)
@@ -42,7 +42,7 @@ function CoverArt({ novel }: { novel: Novel }) {
         .join("");
     return (
         <div
-            className="flex aspect-[2/3] w-full items-center justify-center rounded-lg text-2xl font-semibold text-white/90 shadow-lg shadow-black/40 ring-1 ring-white/5"
+            className="flex aspect-2/3 w-full items-center justify-center rounded-lg text-2xl font-semibold text-white/90 shadow-lg shadow-black/40 ring-1 ring-white/5"
             style={{ background: `linear-gradient(160deg, hsl(${hue} 45% 28%), hsl(${hue} 55% 16%))` }}
         >
             {initials || "?"}
@@ -57,9 +57,9 @@ function hashCode(s: string): number {
 }
 
 export function NovelCard({ novel, liveStats }: { novel: Novel; liveStats?: TaskStats }) {
-    const inProgress = novel.scrapeState === "discovering" || novel.scrapeState === "downloading";
-    const total = liveStats?.total || novel.totalChapters;
-    const done = inProgress && liveStats ? liveStats.success : novel.downloadedChapters;
+    const inProgress = novel.scrape_state === "discovering" || novel.scrape_state === "downloading";
+    const total = liveStats?.total || novel.total_chapters;
+    const done = inProgress && liveStats ? liveStats.success : novel.downloaded_chapters;
     const pct = total > 0 ? Math.round((done / total) * 100) : 0;
 
     return (
@@ -80,7 +80,7 @@ export function NovelCard({ novel, liveStats }: { novel: Novel; liveStats?: Task
                         </div>
                     </div>
                 )}
-                {novel.scrapeState === "error" && (
+                {novel.scrape_state === "error" && (
                     <div className="absolute right-1.5 top-1.5 rounded-full bg-rose-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
                         Error
                     </div>
@@ -96,7 +96,7 @@ export function NovelCard({ novel, liveStats }: { novel: Novel; liveStats?: Task
                 </p>
                 {inProgress && (
                     <p className="mt-0.5 text-xs text-teal-400">
-                        {STATE_LABEL[novel.scrapeState]} {total > 0 && `— ${done}/${total}`}
+                        {STATE_LABEL[novel.scrape_state]} {total > 0 && `— ${done}/${total}`}
                     </p>
                 )}
             </div>

@@ -73,7 +73,8 @@ class WtrLabScraper(BaseScraper):
         if statusbox is not None:
             img_el = statusbox.css_first("img")
             if img_el is not None:
-                cover_image_url = img_el.attributes.get("src")
+                image_src = img_el.attributes.get("src")
+                cover_image_url = f"{base_url}/{image_src}"
 
             chapter_count_label = statusbox.css_first(
                 "span[translate='no']:lexbor-contains('chapters'i)"
