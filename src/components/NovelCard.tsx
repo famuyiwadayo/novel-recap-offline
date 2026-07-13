@@ -8,6 +8,7 @@
 // grid to poll or refetch.
 
 import { Link } from "@tanstack/react-router";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import type { Novel, TaskStats } from "@/types";
 
 const STATE_LABEL: Record<Novel["scrape_state"], string> = {
@@ -19,7 +20,8 @@ const STATE_LABEL: Record<Novel["scrape_state"], string> = {
 };
 
 function CoverArt({ novel }: { novel: Novel }) {
-    const src = novel.cover_image_path ?? novel.cover_image_url;
+    const src = !!novel.cover_image_path ? convertFileSrc(novel.cover_image_path) : novel.cover_image_url
+
     if (src) {
         return (
             <img
@@ -27,6 +29,8 @@ function CoverArt({ novel }: { novel: Novel }) {
                 alt=""
                 className="aspect-2/3 w-full rounded-lg object-cover shadow-lg shadow-black/40 ring-1 ring-white/5"
                 loading="lazy"
+                style={{ viewTransitionName: 'cover-art' }}
+
             />
         );
     }
@@ -66,12 +70,13 @@ export function NovelCard({ novel, liveStats }: { novel: Novel; liveStats?: Task
         <Link
             to="/novel/$novelId"
             params={{ novelId: String(novel.id) }}
+            viewTransition
             className="group block focus:outline-none"
         >
             <div className="relative overflow-hidden rounded-lg transition-transform duration-200 group-hover:-translate-y-1 group-focus-visible:-translate-y-1 group-focus-visible:ring-2 group-focus-visible:ring-teal-400">
                 <CoverArt novel={novel} />
                 {inProgress && (
-                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent px-2 pb-2 pt-4">
+                    <div className="absolute inset-x-0 bottom-0 bg-linear-to-t from-black/80 to-transparent px-2 pb-2 pt-4">
                         <div className="h-1 w-full overflow-hidden rounded-full bg-white/20">
                             <div
                                 className="h-full rounded-full bg-teal-400 transition-[width] duration-300"

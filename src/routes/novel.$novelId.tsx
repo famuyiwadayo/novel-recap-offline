@@ -5,6 +5,8 @@
 
 import { useMemo } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { convertFileSrc } from "@tauri-apps/api/core";
+
 import type { Task } from "@/types";
 import { useTasks, useStatsByGroup } from "@/stores";
 import {
@@ -68,14 +70,17 @@ function NovelDetailPage() {
     );
   }
 
+  // console.log("Novel", convertFileSrc(novel.cover_image_path ?? ""))
+
   return (
     <main className="mx-auto max-w-3xl px-6 py-6">
       <div className="flex gap-5">
         <div className="w-32 shrink-0">
           {novel.cover_image_path || novel.cover_image_url ? (
             <img
-              src={novel.cover_image_path ?? novel.cover_image_url ?? undefined}
+              src={!!novel.cover_image_path ? convertFileSrc(novel.cover_image_path) : novel.cover_image_url ?? undefined}
               alt=""
+              style={{ viewTransitionName: 'cover-art' }}
               className="aspect-2/3 w-full rounded-lg object-cover shadow-lg shadow-black/40"
             />
           ) : (
