@@ -6,15 +6,14 @@
 // across components with no compile-time check that you're passing the
 // right shape.
 
-import { Task, TaskStats } from "@/types";
+import { Chapter, Novel, Task, TaskStats } from "@/types";
 import { pyInvoke } from "tauri-plugin-pytauri-api";
 
 export type Connectivity = { online: boolean };
 export type QueuePaused = { paused: boolean };
 
 export const api = {
-  scrapeNovel: (novelId: number, sourceUrl: string) =>
-    pyInvoke<void>("scrape_novel", { novel_id: novelId, source_url: sourceUrl }),
+  scrapeNovel: (sourceUrl: string) => pyInvoke<number>("scrape_novel", { source_url: sourceUrl }),
 
   downloadImage: (url: string, destPath: string, priority = 0) =>
     pyInvoke<string>("download_image", { url, destPath, priority }),
@@ -38,4 +37,10 @@ export const api = {
   getJobTasks: (group: string) => pyInvoke<Task[]>("get_job_tasks", { group }),
   getConnectivity: () => pyInvoke<Connectivity>("get_connectivity", {}),
   getQueuePaused: () => pyInvoke<QueuePaused>("get_queue_paused", {}),
+
+  // --- library (persisted, SQLite-backed) ---
+  listNovels: () => pyInvoke<Novel[]>("list_novels", {}),
+  getNovel: (novelId: number) => pyInvoke<Novel | null>("get_novel", { novelId }),
+  getNovelChapters: (novelId: number) => pyInvoke<Chapter[]>("get_novel_chapters", { novelId }),
+  deleteNovel: (novelId: number) => pyInvoke<void>("delete_novel", { novelId }),
 };

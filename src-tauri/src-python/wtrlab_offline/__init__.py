@@ -25,10 +25,6 @@ from backend.shutdown_listener import register_shutdown_listener
 app_handle: AppHandle
 
 
-class Person(BaseModel):
-    name: str
-
-
 class ImportPayload(BaseModel):
     url: str
 
@@ -36,6 +32,11 @@ class ImportPayload(BaseModel):
 def get_resource_dir(app_handle_: AppHandle) -> Path:
     path_resolver: PathResolver = Manager.path(app_handle_)
     return path_resolver.resource_dir()
+
+
+def get_app_data_dir(app_handle_: AppHandle) -> Path:
+    path_resolver: PathResolver = Manager.path(app_handle_)
+    return path_resolver.app_data_dir()
 
 
 def resolve_browser_path(app_handle_: AppHandle) -> str:

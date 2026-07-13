@@ -18,3 +18,30 @@ export interface ExtractedChapter {
   content: string;
   source_url: string;
 }
+
+export type Novel = {
+  id: number;
+  sourceUrl: string;
+  title: string | null;
+  author: string[];
+  otherTitles: string[];
+  tags: string[];
+  summary: string | null;
+  status: string | null;
+  coverImageUrl: string | null;
+  coverImagePath: string | null;
+  totalChapters: number;
+  downloadedChapters: number;
+  scrapeState: "pending" | "discovering" | "downloading" | "complete" | "error";
+  addedAt: string;
+  updatedAt: string;
+};
+
+export type Chapter = {
+  novelId: number;
+  chapterNumber: number;
+  title: string | null;
+  sourceUrl: string | null;
+  contentPath: string | null;
+  downloadedAt: string | null;
+};

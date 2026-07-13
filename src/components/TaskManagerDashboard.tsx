@@ -28,7 +28,7 @@ function ConnectivityBanner({ online }: { online: boolean }) {
     );
 }
 
-function NewScrapeForm({ onSubmitted }: { onSubmitted?: () => void }) {
+function NewScrapeForm({ onSubmitted }: { onSubmitted?: (novelId: number) => void }) {
     const [url, setUrl] = useState("https://wtr-lab.com/en/novel/53992/lord-god-tier-attribute-recruits-fallen-angels-of-original-sin");
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -39,13 +39,12 @@ function NewScrapeForm({ onSubmitted }: { onSubmitted?: () => void }) {
         setSubmitting(true);
         setError(null);
         try {
-            // Auto-generated id — replace with a real DB-assigned novel id once
-            // there's a proper library/catalog layer; this just needs to be a
-            // unique-enough integer for a single-user local session.
-            const novelId = Date.now();
-            await api.scrapeNovel(novelId, url.trim());
+            // novel_id no longer generated here — the backend's get_or_create_novel()
+            // owns id assignment now (and reuses the existing row if this URL's
+            // already in the library, instead of creating a duplicate entry)
+            const novelId = await api.scrapeNovel(url.trim());
             setUrl("");
-            onSubmitted?.();
+            onSubmitted?.(novelId);
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         } finally {

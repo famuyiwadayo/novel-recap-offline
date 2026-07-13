@@ -131,6 +131,27 @@ class DBManager:
         self._db_path = str(db_path)
         self._conn: Optional[aiosqlite.Connection] = None
 
+    def set_db_path(self, db_path: Union[str, Path]) -> None:
+        """Change where this instance will open its database, e.g. once
+        you know the real OS-appropriate app-data directory (only
+        available via AppHandle, which isn't known yet at module-import
+        time when DBManager is first constructed).
+
+        Deliberately mutates THIS instance rather than requiring callers
+        to construct a new DBManager and reassign a global — anything
+        that already did `from backend.app import db_manager` holds a
+        snapshot of that name's binding at import time, and would NOT see
+        a later `db_manager = DBManager(...)` reassignment in app.py (a
+        classic from-import gotcha: rebinding a module-level name doesn't
+        propagate to modules that already imported it). Mutating the
+        existing object in place means every reference — however it was
+        imported — still points at the same instance."""
+        if self._conn is not None:
+            raise RuntimeError(
+                "Cannot change db_path after start() has already opened a connection"
+            )
+        self._db_path = str(db_path)
+
     async def start(self) -> None:
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = await aiosqlite.connect(self._db_path)

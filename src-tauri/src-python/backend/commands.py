@@ -6,17 +6,20 @@ into a call against manager/network_mgr (from app.py) and returns a schema
 network_manager.py, and the scraper plugins.
 """
 
-from typing import List
-
+from typing import List, Optional
 from pytauri import Commands, AppHandle, Emitter
 
-from backend.app import manager, network_mgr
+from backend.app import manager, network_mgr, db_manager
 
 from backend.plugins import ImageDownloadPayload
 from backend.scrapers.task_plugins import NovelDiscoveryPayload
 from backend.schemas import (
     StatsPayload,
     TaskPayload,
+    NovelPayload,
+    ScrapeNovelArg,
+    NovelIdArg,
+    ChapterPayload,
     ResumeJobPayload,
     ResumeTaskPayload,
     PauseJobPayload,
@@ -31,24 +34,61 @@ from backend.schemas import (
     GetJobTasksPayload,
     task_payload,
     stats_payload,
+    novel_payload,
+    chapter_payload,
 )
 
 commands = Commands()
 
 
 @commands.command()
-async def scrape_novel(body: NovelDiscoveryPayload) -> None:
-    """Start scraping a novel. novel_id is supplied by the caller rather than
-    generated here — it presumably already exists (e.g. a DB row you created
-    before kicking off the scrape), matching ExtractedChapter.novel_id's
-    type. Use group=str(novel_id) to filter 'task-update'/'queue-stats'
-    events and to call retry_failed(group=str(novel_id)) later."""
+async def scrape_novel(body: ScrapeNovelArg) -> int:
+    """Start scraping a novel. novel_id is no longer supplied by the
+    caller — the DB owns id generation now. Calling this again with the
+    same source_url reuses the existing novel row (get_or_create_novel is
+    idempotent) rather than creating a duplicate library entry, so it's
+    safe to call as a "add or resume" action. Returns the novel_id — use
+    group=str(novel_id) to filter 'task-update'/'queue-stats' events and
+    to call retry_failed(group=str(novel_id)) later."""
+    novel = await db_manager.get_or_create_novel(body.source_url)
     await manager.enqueue(
         "novel_discovery",
-        body,
-        group=str(body.novel_id),
+        NovelDiscoveryPayload(novel_id=novel.id, source_url=body.source_url),
+        group=str(novel.id),
         priority=-10,  # discovery should jump ahead of any queued chapter/image work
     )
+    return novel.id
+
+
+@commands.command()
+async def list_novels() -> List[NovelPayload]:
+    """Everything in the library — the data source for a grid/list view.
+    Persisted (SQLite), unlike task-queue state which resets on restart."""
+    return [novel_payload(n) for n in await db_manager.list_novels()]
+
+
+@commands.command()
+async def get_novel(body: NovelIdArg) -> Optional[NovelPayload]:
+    novel = await db_manager.get_novel(body.novel_id)
+    return novel_payload(novel) if novel else None
+
+
+@commands.command()
+async def get_novel_chapters(body: NovelIdArg) -> List[ChapterPayload]:
+    """Persisted chapter records (metadata + where each one lives on
+    disk) — for a novel detail/reader view. Not the same as
+    get_job_tasks(group), which shows the CURRENT in-progress queue state
+    for that novel, including chapters not yet downloaded."""
+    return [chapter_payload(c) for c in await db_manager.get_chapters(body.novel_id)]
+
+
+@commands.command()
+async def delete_novel(body: NovelIdArg) -> None:
+    """Removes the novel and its chapter records from the library.
+    Does NOT cancel an in-progress scrape for it — call cancel_job(group)
+    first if one might be running, or this just deletes the DB record out
+    from under an active job."""
+    await db_manager.delete_novel(body.novel_id)
 
 
 @commands.command()
