@@ -79,7 +79,7 @@ export function NovelCard({ novel, liveStats }: { novel: Novel; liveStats?: Task
                     <div className="absolute inset-x-0 bottom-0 bg-linear-to-t from-black/80 to-transparent px-2 pb-2 pt-4">
                         <div className="h-1 w-full overflow-hidden rounded-full bg-white/20">
                             <div
-                                className="h-full rounded-full bg-teal-400 transition-[width] duration-300"
+                                className="h-full rounded-full bg-teal-400 transition-[width] will-change-[width] duration-300"
                                 style={{ width: `${pct}%` }}
                             />
                         </div>

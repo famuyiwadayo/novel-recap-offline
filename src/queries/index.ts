@@ -11,6 +11,8 @@ export const queryKeys = {
   novels: ["novels"] as const,
   novel: (id: number) => ["novel", id] as const,
   novelChapters: (id: number) => ["novel", id, "chapters"] as const,
+  chapterContent: (novelId: number, chapterNumber: number) =>
+    ["novel", novelId, "chapter", chapterNumber, "content"] as const,
 };
 
 // --- reads -----------------------------------------------------------
@@ -32,6 +34,18 @@ export function useNovelChaptersQuery(novelId: number) {
     queryKey: queryKeys.novelChapters(novelId),
     queryFn: () => api.getNovelChapters(novelId),
     enabled: Number.isFinite(novelId),
+  });
+}
+
+export function useChapterContentQuery(novelId: number, chapterNumber: number) {
+  return useQuery({
+    queryKey: queryKeys.chapterContent(novelId, chapterNumber),
+    queryFn: () => api.getChapterContent(novelId, chapterNumber),
+    // Chapter text is immutable once downloaded (a re-download would be a
+    // deliberate resume_novel()/retry action, not something that happens
+    // silently) — no reason to ever refetch it in the background.
+    staleTime: Infinity,
+    enabled: Number.isFinite(novelId) && Number.isFinite(chapterNumber),
   });
 }
 

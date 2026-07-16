@@ -275,6 +275,7 @@ async def startup() -> None:
     guarantees this."""
     await pw_manager.start()
     await db_manager.start()
+    await reconcile_all_novels()
 
 
 async def shutdown() -> None:

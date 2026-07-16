@@ -1,12 +1,11 @@
+
 // Novel detail page. Persisted metadata + downloaded chapters come from
 // TanStack Query (backed by SQLite); in-progress task state (chapters not
 // yet downloaded, retry controls) comes from the Zustand store, filtered
 // to this novel's group.
 
 import { useMemo } from "react";
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { convertFileSrc } from "@tauri-apps/api/core";
-
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import type { Task } from "@/types";
 import { useTasks, useStatsByGroup } from "@/stores";
 import {
@@ -16,6 +15,7 @@ import {
   useDeleteNovelMutation,
   useResumeNovelMutation,
 } from "@/queries";
+import { convertFileSrc } from "@tauri-apps/api/core";
 
 export const Route = createFileRoute("/novel/$novelId")({
   component: NovelDetailPage,
@@ -70,18 +70,17 @@ function NovelDetailPage() {
     );
   }
 
-  // console.log("Novel", convertFileSrc(novel.cover_image_path ?? ""))
-
   return (
     <main className="mx-auto max-w-3xl px-6 py-6">
       <div className="flex gap-5">
         <div className="w-32 shrink-0">
           {novel.cover_image_path || novel.cover_image_url ? (
             <img
-              src={!!novel.cover_image_path ? convertFileSrc(novel.cover_image_path) : novel.cover_image_url ?? undefined}
+              src={novel.cover_image_path ? convertFileSrc(novel.cover_image_path) : novel.cover_image_url ?? undefined}
               alt=""
-              style={{ viewTransitionName: 'cover-art' }}
               className="aspect-2/3 w-full rounded-lg object-cover shadow-lg shadow-black/40"
+              style={{ viewTransitionName: 'cover-art' }}
+
             />
           ) : (
             <div className="aspect-2/3 w-full rounded-lg bg-slate-800" />
@@ -146,11 +145,17 @@ function NovelDetailPage() {
       <h2 className="mb-2 mt-8 text-sm font-semibold text-slate-300">Chapters</h2>
       <ul className="divide-y divide-slate-800/80 rounded-lg border border-slate-800">
         {downloadedChapters.map((c) => (
-          <li key={c.chapter_number} className="flex items-center gap-2 px-3 py-2 text-sm">
-            <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
-            <span className="min-w-0 flex-1 truncate text-slate-200">
-              {c.chapter_number}. {c.title ?? `Chapter ${c.chapter_number}`}
-            </span>
+          <li key={c.chapter_number}>
+            <Link
+              to="/novel/$novelId/chapter/$chapterNumber"
+              params={{ novelId, chapterNumber: String(c.chapter_number) }}
+              className="flex items-center gap-2 px-3 py-2 text-sm transition hover:bg-slate-800/60 focus-visible:outline-none focus-visible:bg-slate-800/60"
+            >
+              <span className="h-2 w-2 shrink-0 rounded-full bg-emerald-400" />
+              <span className="min-w-0 flex-1 truncate text-slate-200">
+                {c.chapter_number}. {c.title ?? `Chapter ${c.chapter_number}`}
+              </span>
+            </Link>
           </li>
         ))}
         {liveChapterTasks
@@ -173,5 +178,3 @@ function NovelDetailPage() {
     </main>
   );
 }
-
-

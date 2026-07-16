@@ -343,6 +343,21 @@ class DBManager:
         rows = await cursor.fetchall()
         return [_row_to_chapter(r) for r in rows]
 
+    async def get_chapter(
+        self, novel_id: int, chapter_number: int
+    ) -> Optional[ChapterRecord]:
+        """Single-chapter lookup — for the reader view fetching one
+        chapter's content_path. Returns None whether the chapter doesn't
+        exist at all or just hasn't downloaded yet (downloaded_at NULL) —
+        callers needing to distinguish those cases should use
+        get_missing_chapters()/get_all_chapters() instead."""
+        cursor = await self.conn.execute(
+            "SELECT * FROM chapters WHERE novel_id = ? AND chapter_number = ? AND downloaded_at IS NOT NULL",
+            (novel_id, chapter_number),
+        )
+        row = await cursor.fetchone()
+        return _row_to_chapter(row) if row else None
+
     async def get_missing_chapters(self, novel_id: int) -> List[ChapterRecord]:
         """Seeded but not yet downloaded — the reconciliation query.
         source_url is always populated for these (seeded from discovery),
@@ -365,3 +380,40 @@ class DBManager:
         )
         rows = await cursor.fetchall()
         return [_row_to_chapter(r) for r in rows]
+
+    async def mark_chapters_missing(
+        self, novel_id: int, chapter_numbers: List[int]
+    ) -> None:
+        """Resets specific chapters back to 'not downloaded' — used when a
+        chapter was marked SUCCESS but its saved content turns out to be
+        empty or a bot-challenge page (e.g. Cloudflare's "Just a
+        moment..." interstitial) rather than the real chapter, detected
+        after the fact by scanning files on disk. After this,
+        get_missing_chapters() will include these again, so the normal
+        reconciliation path re-enqueues them — no separate re-queue
+        mechanism needed. Recomputes downloaded_chapters and reverts
+        scrape_state from 'complete' back to 'downloading' if this drops
+        the novel below fully-downloaded."""
+        if not chapter_numbers:
+            return
+        await self.conn.executemany(
+            "UPDATE chapters SET title = NULL, content_path = NULL, downloaded_at = NULL "
+            "WHERE novel_id = ? AND chapter_number = ?",
+            [(novel_id, n) for n in chapter_numbers],
+        )
+        cursor = await self.conn.execute(
+            "SELECT COUNT(*) AS downloaded, "
+            "(SELECT COUNT(*) FROM chapters WHERE novel_id = ?) AS total "
+            "FROM chapters WHERE novel_id = ? AND downloaded_at IS NOT NULL",
+            (novel_id, novel_id),
+        )
+        row = await cursor.fetchone()
+        downloaded, total = row["downloaded"] if row else 0, row["total"] if row else 0
+        is_complete = total > 0 and downloaded >= total
+        await self.conn.execute(
+            "UPDATE novels SET downloaded_chapters = ?, updated_at = ?, "
+            "scrape_state = CASE WHEN ? THEN scrape_state ELSE 'downloading' END "
+            "WHERE id = ?",
+            (downloaded, _now(), is_complete, novel_id),
+        )
+        await self.conn.commit()

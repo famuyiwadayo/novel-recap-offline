@@ -130,6 +130,11 @@ class ChapterPayload(BaseModel):
     downloaded_at: Optional[str]
 
 
+class GetChapterContentArg(BaseModel):
+    novel_id: int
+    chapter_number: int
+
+
 def novel_payload(n: NovelRecord) -> NovelPayload:
     return NovelPayload(
         id=n.id,

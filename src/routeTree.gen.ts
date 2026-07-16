@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as DownloadsRouteImport } from './routes/downloads'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as NovelNovelIdRouteImport } from './routes/novel.$novelId'
+import { Route as NovelNovelIdChapterChapterNumberRouteImport } from './routes/novel_.$novelId_.chapter_.$chapterNumber'
 
 const DownloadsRoute = DownloadsRouteImport.update({
   id: '/downloads',
@@ -28,35 +29,58 @@ const NovelNovelIdRoute = NovelNovelIdRouteImport.update({
   path: '/novel/$novelId',
   getParentRoute: () => rootRouteImport,
 } as any)
+const NovelNovelIdChapterChapterNumberRoute =
+  NovelNovelIdChapterChapterNumberRouteImport.update({
+    id: '/novel_/$novelId_/chapter_/$chapterNumber',
+    path: '/novel/$novelId/chapter/$chapterNumber',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/downloads': typeof DownloadsRoute
   '/novel/$novelId': typeof NovelNovelIdRoute
+  '/novel/$novelId/chapter/$chapterNumber': typeof NovelNovelIdChapterChapterNumberRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/downloads': typeof DownloadsRoute
   '/novel/$novelId': typeof NovelNovelIdRoute
+  '/novel/$novelId/chapter/$chapterNumber': typeof NovelNovelIdChapterChapterNumberRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/downloads': typeof DownloadsRoute
   '/novel/$novelId': typeof NovelNovelIdRoute
+  '/novel_/$novelId_/chapter_/$chapterNumber': typeof NovelNovelIdChapterChapterNumberRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/downloads' | '/novel/$novelId'
+  fullPaths:
+    | '/'
+    | '/downloads'
+    | '/novel/$novelId'
+    | '/novel/$novelId/chapter/$chapterNumber'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/downloads' | '/novel/$novelId'
-  id: '__root__' | '/' | '/downloads' | '/novel/$novelId'
+  to:
+    | '/'
+    | '/downloads'
+    | '/novel/$novelId'
+    | '/novel/$novelId/chapter/$chapterNumber'
+  id:
+    | '__root__'
+    | '/'
+    | '/downloads'
+    | '/novel/$novelId'
+    | '/novel_/$novelId_/chapter_/$chapterNumber'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   DownloadsRoute: typeof DownloadsRoute
   NovelNovelIdRoute: typeof NovelNovelIdRoute
+  NovelNovelIdChapterChapterNumberRoute: typeof NovelNovelIdChapterChapterNumberRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +106,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof NovelNovelIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/novel_/$novelId_/chapter_/$chapterNumber': {
+      id: '/novel_/$novelId_/chapter_/$chapterNumber'
+      path: '/novel/$novelId/chapter/$chapterNumber'
+      fullPath: '/novel/$novelId/chapter/$chapterNumber'
+      preLoaderRoute: typeof NovelNovelIdChapterChapterNumberRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,6 +120,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   DownloadsRoute: DownloadsRoute,
   NovelNovelIdRoute: NovelNovelIdRoute,
+  NovelNovelIdChapterChapterNumberRoute: NovelNovelIdChapterChapterNumberRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -6,8 +6,12 @@ into a call against manager/network_mgr (from app.py) and returns a schema
 network_manager.py, and the scraper plugins.
 """
 
+from pathlib import Path
 from typing import List, Optional
+from anyio import to_thread
+
 from pytauri import Commands, AppHandle, Emitter
+
 
 from backend.app import manager, network_mgr, db_manager
 
@@ -32,6 +36,7 @@ from backend.schemas import (
     CancelTaskPayload,
     GetJobStatsPayload,
     GetJobTasksPayload,
+    GetChapterContentArg,
     task_payload,
     stats_payload,
     novel_payload,
@@ -80,6 +85,30 @@ async def get_novel_chapters(body: NovelIdArg) -> List[ChapterPayload]:
     get_job_tasks(group), which shows the CURRENT in-progress queue state
     for that novel, including chapters not yet downloaded."""
     return [chapter_payload(c) for c in await db_manager.get_chapters(body.novel_id)]
+
+
+@commands.command()
+async def get_chapter_content(body: GetChapterContentArg) -> str:
+    """Reads a single chapter's actual text off disk — get_novel_chapters
+    only returns metadata (title, content_path, downloaded_at), not the
+    content itself, to keep that list cheap for novels with hundreds of
+    chapters. This is the reader view's data source."""
+    chapter = await db_manager.get_chapter(body.novel_id, body.chapter_number)
+    if chapter is None:
+        raise ValueError(
+            f"Chapter {body.chapter_number} of novel {body.novel_id} isn't downloaded (or doesn't exist)"
+        )
+    if not chapter.content_path:
+        raise ValueError(
+            f"Chapter {body.chapter_number} of novel {body.novel_id} has no recorded content_path"
+        )
+    path = Path(chapter.content_path)
+    if not path.exists():
+        raise ValueError(
+            f"Chapter {body.chapter_number}'s file is missing from disk ({chapter.content_path!r}) — "
+            f"try resume_novel({body.novel_id}) to re-download it"
+        )
+    return await to_thread.run_sync(path.read_text, "utf-8")
 
 
 @commands.command()
